@@ -1,0 +1,23 @@
+-- 插件元信息集中管理：版本号、描述、关于文案
+-- 所有需要展示版本/关于的地方统一从这里读取，避免多处维护不同步。
+--   - main.lua: require("fanqie.info") 读取 version 和 about_template
+--   - _meta.lua: pcall(require, "fanqie.info") 读取 version 和 description
+--
+-- about_template 用 T() 格式化，占位符：
+--   %1 = 版本号（self.version）
+--   %2 = 缓存目录（self.settings:get_download_dir()）
+
+local ok_gettext, gettext = pcall(require, "gettext")
+local _ = ok_gettext and gettext or function(text) return text end
+
+return {
+    -- 版本号（唯一来源，main.lua 和 _meta.lua 都读这里）
+    version = "2.16.23",
+
+    -- 插件描述（_meta.lua 的 description 字段使用）
+    description = _("在 KOReader 中阅读番茄小说，支持扫码登录、官方 App 协议与内置番茄APP书源、书城浏览、在线更新、两层智能缓存、进度同步，适配墨水屏黑白显示。"),
+
+    -- 关于文案模板：main.lua 两处「关于」对话框共用
+    -- 修改文案只需改这一处，两处关于对话框自动同步
+    about_template = _("番茄小说插件 v%1\n\n为 KOReader 打造的墨水屏阅读体验，适配黑白电子墨水屏。\n\n核心特性:\n• 扫码登录: 番茄网页扫码，自动获取书架/进度/目录\n• 官方 App 协议: 正文/目录/书架走番茄 App reading 协议，设备身份本机自动注册，无需任何配置\n• 内置番茄APP源: 移植阅读App书源签名/加密，支持搜索/发现/目录/正文，作为官方协议失败时的回退\n• 书城浏览: 番茄网页接口浏览分类/排行榜/搜索，免登录可看，一键加入书架\n• 漫画支持: 漫画书自动识别，逐页下载后本机解密（AES-256-GCM）并内联显示，无需任何配置\n• 段评功能: 走官方 commentapi 协议（统计+列表+回复），正文内显示段评数字气泡，开关常驻设置页\n• 初始页面: 可把 KOReader 启动页设为番茄书架，启动即进入书架\n• 返回书架: 阅读菜单一键回书架 / 可绑手势 / 关闭阅读器后自动回书架\n• 在线更新: 内置自更新器，一键检查/下载/安装新版本，SHA-256 校验 + 自动备份回滚，支持国内镜像\n• 异步引擎: 目录获取/章节下载/进度上传/登录检测均在子进程执行，UI 零卡顿\n• 两层缓存: 书架/目录采用内存主源+文件后备策略，显示层零文件IO\n• 静默刷新: 进入阅读自动更新目录，后台刷新书架不闪烁\n• 智能回退: 网络失败保留旧缓存，Cookie过期不丢失数据\n• 预下载: 阅读时后台自动下载后续章节\n• 进度同步: 进入阅读自动拉取云端进度，阅读中定期上传\n\n下载格式: HTML\n缓存目录: %2"),
+}
