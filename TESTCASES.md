@@ -189,6 +189,23 @@
 - **EXC-002 弱网超时 ✅**：hosts 黑洞 `novelfm-hl.snssdk.com` → 10.255.255.1 模拟超时 → mget 请求 20s 超时上限（`code=timeout elapsed=20102ms`）→ 自动回退 official → 可读错误提示；重试再次超时仍正常报错，UI 不永久卡忙碌态
 - 测试后环境已恢复：hosts 清理 + /system remount ro、设备池备份还原（3 台）、WiFi 保持开启、config.lua 未使用
 
+### waydroid 回归（2026-10-20 深夜 ~ 10-21，waydroid Android 13 x86_64，KOReader v2026.07.2-270-g426e932）
+
+本轮在 waydroid 虚拟 Android 环境对 v2.16.23（本地 e0391cd）做全链路冒烟 + 修复验证，覆盖书城/详情/目录/正文/自动续章/预下载/返回书架/启动页/书源管理/设置持久化。部署要点：x86_64 APK 替换 arm64 构建（后者白屏无界面）；`appops set org.koreader.launcher MANAGE_EXTERNAL_STORAGE allow` 授予存储权限。
+
+- **菜单入口 ✅**：插件经 MenuSorter orphan 归属「工具」菜单第 2 页「番茄小说」
+- **搜索/详情/目录 ✅**：搜索「1」返回 10 条结果；详情对话框（简介/开始阅读/章节目录/下载）正常；1496 章《十日终焉》目录首次获取因子进程 60s 超时失败（waydroid DNS 偶发慢 + 小屏），重试成功（125 页）
+- **正文/自动续章/预下载 ✅**：详情 → 开始阅读正文渲染正常；章末自动切章；后续章节后台预下载
+- **返回书架 ✅**：阅读菜单「返回书架」回书架上次停留页并保持排序/搜索关键字；不闪文件管理器、不退出 App
+- **启动页 ✅**：初始页面设为番茄书架后重启直接进书架；改回文件管理器需重启 KOReader 生效（`Startup.syncKoreaderStartWith` 仅在 FileManager 插件 init 时执行；直接改 settings 文件须先 force-stop，否则被内存缓存覆盖）
+- **书源管理 ✅**：设备池显示 2 台；设置持久化正常
+- **修复 4 个 bug**：
+  1. `appsource.lua` `put_status` local 定义在 search/get_book_info 调用点**之后** → 搜索必报 `attempt to call global 'put_status' (a nil value)`；定义前移至 get_book_info 之前后复测通过（已全仓扫描，无其他同类 local 前向引用）
+  2. `_meta.lua` 移除 KOReader 2026.07 已废弃的 `name` 字段（启动警告 `name in _meta.lua, is deprecated and will be ignored`）
+  3. `main.lua` 设置页「Upload progress on close」「config.lua loaded.」两处英文文案中文化（i18n.lua 的 `I18n.tr` 全仓零调用为死代码，故直接改源串）
+  4. `async.lua` 子进程超时回调文案 "async timeout" → 「请求超时，请检查网络后重试」
+- **环境备注**：waydroid 网络间歇断连导致偶发「transport_request连接失败： wantread」/「Network is unreachable」，重试即恢复，非插件缺陷；adb `input text` 无法注入中文（NullPointerException），搜索改用「1」验证全链路；书架真实数据需扫码登录 Cookie，本轮以注入临时 shelf_cache 验证显示层（已清理）
+
 ## 建议真机执行顺序
 
 1. **P0 冒烟**（首次部署必测）：APP-001 → CT-001 → MS-005 → EXC-001 → DT-002 → APP-002
@@ -205,4 +222,5 @@
 | 2026-10-15 | CT-005/UI-003 | AInote 墨水屏 | 批量下载全书不可取消：进度框无取消按钮，进行中按返回键下载不中断（13% 时按返回，继续下载至 100% 完成） | `[Download] finish: downloaded=61 failed=0 skipped=7 cancelled=false` | 已记录；修复：进度框增加「取消」按钮并设置下载循环的 cancel 标志（日志字段已预留 `cancelled`） |
 | 2026-10-15 | CT-005 | AInote 墨水屏 | 下载进度框标题显示原始占位符「下载 %s」；完成提示显示「跳过已缓存 %d 章」 | 截图 OCR 直出未格式化文本 | 已记录；修复：补 string.format 参数替换 |
 | 2026-10-15 | CT-007 | AInote 墨水屏 | 缓存章节 HTML 尾部 `</body></html>` 重复闭合一次（2×`</body>` 2×`</html>`） | 抽检 ch1/5/7 均复现 | 已记录；crengine 容错不影响渲染；修复：查 content.lua 包裹 HTML 模板拼接处 |
+| 2026-10-21 | SR-001 | waydroid Android 13 x86_64 | 搜索任意关键词必崩 | `appsource.lua:542: attempt to call global 'put_status' (a nil value)` | 已修复：`put_status` local 定义原在 search/get_book_info 调用点之后，Lua 前向引用到全局 nil；前移至 get_book_info 之前 |
 |      |          |           |      |                |      |
