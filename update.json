@@ -1,0 +1,16 @@
+{
+  "version": "2.16.24",
+  "name": "番茄小说 2.16.24",
+  "channel": "stable",
+  "package_type": "full",
+  "package_url": "https://github.com/hesan1232/fanqie.koplugin/releases/download/v2.16.24/fanqie.koplugin.zip",
+  "package_urls": [
+    "https://github.com/hesan1232/fanqie.koplugin/releases/download/v2.16.24/fanqie.koplugin.zip",
+    "https://ghfast.top/https://github.com/hesan1232/fanqie.koplugin/releases/download/v2.16.24/fanqie.koplugin.zip",
+    "https://gh-proxy.com/https://github.com/hesan1232/fanqie.koplugin/releases/download/v2.16.24/fanqie.koplugin.zip",
+    "https://ghproxy.net/https://github.com/hesan1232/fanqie.koplugin/releases/download/v2.16.24/fanqie.koplugin.zip"
+  ],
+  "size": 443267,
+  "sha256": "4db4ea2046cd67c55470adc6b876711f8f9455576f3e7d2e73491d9c121562d5",
+  "notes": "- **书城网格第一行压住「排序/状态」胶囊**：控件行（tab 栏、筛选行）改挂进 `item_group`\n  头部，与网格行同一 `VerticalGroup`，结构上不可能再错位；格子内容改为顶部对齐\n  （居中时溢出上下各分一半，上一半画进上一行）；`item_group:clear()` 会连控件行一起\n  释放，重建前先把引用置 nil 防二次释放。\n- **「加入书架」不再每章都弹**：切章与真离开都走 `onCloseDocument`，老实现靠延后一拍\n  猜时序，慢设备落进空窗 ⇒ 每章问一次；现用显式标志区分切章（置位/就绪清位/10 秒兜底），\n  一本书只在离开时问一次。\n- **段评数字太小、不好点**：气泡 `0.5em` → `0.72em` 并留白；新增「段评整段可点」\n  （默认开）：段落整体可点并带下划线，按气泡位置切段包链接，不产生嵌套 `<a>`。\n- **老缓存就地升级**：缓存头写结构版本 `fanqie-format`，打开时就地升级（不联网、不动\n  正文，离线生效；关开关会拆回锚点）；>1.5 MB 图集页跳过。"
+}
