@@ -874,6 +874,96 @@ local function ensure_categories(plugin, gender, cb)
     end, { poll_interval = 0.3, timeout = 30, tag = ASYNC_TAG })
 end
 
+--- 分类树选择器的**树状折叠**条目构造（上游 v2.16.25，本地移植）。
+--- 参考「树状评论区」的展开/收起：主分类（一级）常展开；主题/角色/情节（二级）
+--- 各自折叠成一行「▸ 主题（33）」，点一下展开、再点收起。
+--- 🔴 为什么不压平了：旧版把 150+ 条全铺出来（13~16 页），扫不动；
+---    而榜单接口实测**只认主分类**（二级分类 id 回 152 字节空表，2026-10-21 探针
+---    `_probe_rank_subcat`：1141 主分类 8372B vs 511/516/1079 二级全空表），
+---    所以树只做在分类浏览这边，二级分类走书库接口。
+--- 折叠状态按性别记在 plugin 上：选择器关掉再开还留着，男/女频两棵树互不干扰。
+---@param on_pick function(category|nil) 选中回调（nil = 「全部」；主分类与「全部」走它）
+---@param reshow function() 切换折叠后**重开本选择器**的回调。选择器是静态列表
+---   没有原地重绘；「关掉重开」是现有选择器交互里最稳的路（换性别/换分类也这么走），
+---   且 show_chooser 开头自带 close_chooser 防叠加。
+---@param opts table { all_first=true → 「全部」放最前；all_last=true → 放最后；
+---   sub_pick=function(category) → 二级分类的选中回调（缺省同 on_pick。榜单方用它把
+---   二级分类跳到书库 —— 榜单接口只认主分类 id） }
+local function category_tree_entries(plugin, gender, list, on_pick, reshow, opts)
+    opts = opts or {}
+    local fold = plugin._store_cat_fold
+    if type(fold) ~= "table" then fold = {} plugin._store_cat_fold = fold end
+    if type(fold[gender]) ~= "table" then fold[gender] = {} end
+    fold = fold[gender]
+
+    local entries = {}
+    if opts.all_first then
+        entries[#entries + 1] = { text = _("全部"), callback = function() on_pick(nil) end }
+    end
+    -- 二级分类的选中回调：分类浏览里二级与主分类同路（都走书库接口）；榜单里
+    -- **接口只认主分类** ⇒ 二级分类由调用方指定另一条路（跳书库，见 sub_pick）。
+    local sub_pick = opts.sub_pick or on_pick
+    local groups = Store.group_categories(list)
+    local has_main = false
+    for _i, g in ipairs(groups) do
+        if g.label == "主分类" then
+            has_main = true
+            -- 一级分类：常展开；组头保持不可点的分隔条样式（与旧版一致，点了没反应
+            -- 的行会让人犹豫，所以这里**故意**沿用 separator 而不是做成可点的折叠头）
+            entries[#entries + 1] = {
+                separator = true,
+                text = T(_("── %1（%2）──"), g.label, tostring(#(g.items or {}))),
+            }
+            for _j, c in ipairs(g.items or {}) do
+                entries[#entries + 1] = { text = c.name, callback = function() on_pick(c) end }
+            end
+        else
+            -- 二级分类组：折叠成一行（▸ 展开 / ▾ 收起），树状评论区的同款交互
+            local expanded = fold[g.label] and true or false
+            entries[#entries + 1] = {
+                text = (expanded and "▾ " or "▸ ")
+                    .. T(_("%1（%2）"), g.label, tostring(#(g.items or {}))),
+                callback = function()
+                    fold[g.label] = not fold[g.label]
+                    reshow()
+                end,
+            }
+            if expanded then
+                for _j, c in ipairs(g.items or {}) do
+                    -- 展开后缩进一级（全角空格），组名前缀不再需要 —— 头一行就是组名
+                    entries[#entries + 1] = {
+                        text = "　" .. c.name,
+                        callback = function() sub_pick(c) end,
+                    }
+                end
+            end
+        end
+    end
+    if not has_main and #entries > 0 then
+        -- 🔴 兜底：分类树拿不到「主分类」分组（接口异常/字段变了）时，别把用户
+        --    锁死在几个折叠组里 —— 退回旧版压平行为，全部条目走主选中回调。
+        entries = {}
+        if opts.all_first then
+            entries[#entries + 1] = { text = _("全部"), callback = function() on_pick(nil) end }
+        end
+        for _i, c in ipairs(list or {}) do
+            entries[#entries + 1] = { text = c.name, callback = function() on_pick(c) end }
+        end
+        if opts.all_last then
+            entries[#entries + 1] = { text = _("全部"), callback = function() on_pick(nil) end }
+        end
+        return entries
+    end
+    if opts.all_last then
+        entries[#entries + 1] = { text = _("全部"), callback = function() on_pick(nil) end }
+    end
+    if #entries == 0 then
+        -- 分类树拿不到（接口异常/字段变了）时，别给用户一个空菜单
+        entries[1] = { text = _("（没有分类）") }
+    end
+    return entries
+end
+
 --- 分类浏览的 tab 栏：男频 | 女频（原地换频道）+ 分类…（原地换分类）+
 --- 榜单 / 搜索（还是老的选择器入口）。active 由当前 state 现算。
 --- （函数体在这里赋值，前向声明见 view_action 上方。）
@@ -892,47 +982,23 @@ switch_library_gender = function(plugin, menu, gender)
 end
 
 --- tab 的「分类…」：在**当前菜单**上原地换分类（不再一层层弹选择器 → 重开菜单）。
---- 列表压平成一层：每个分类带分组前缀，不再「分组 → 分类」两层。
+--- 上游 v2.16.25 起树状折叠（本地移植）：主分类常展开，主题/角色/情节折叠成一行
+--- 点击展开（见 category_tree_entries；旧版压平 150+ 条要翻十几页，没法扫）。
 show_library_categories = function(plugin, menu)
     local st = menu._store_state
     if not st then return end
     ensure_categories(plugin, st.gender, function(list)
-        local entries = {
-            { text = _("全部"), callback = function()
-                st.category_id = -1
-                st.category_name = _("全部")
-                menu._store_subtitle = Store.gender_label(st.gender) .. "·" .. st.category_name
-                reload_from_head(plugin, menu)
-            end },
-        }
-        local groups = Store.group_categories(list)
-        for _i, g in ipairs(groups) do
-            -- 组间分隔头（不可点）：压平后 150+ 条全靠前缀区分，没有分组头就是
-            -- 十几页无结构的长串。条目量实测：男频 154（主 19/主题 33/角色 22/情节 80）、
-            -- 女频 182（主 21/主题 25/角色 41/情节 95）。
-            entries[#entries + 1] = {
-                separator = true,
-                text = T(_("── %1（%2）──"), g.label, tostring(#(g.items or {}))),
-            }
-            for _j, c in ipairs(g.items or {}) do
-                local label = c.name
-                if g.label ~= "主分类" then
-                    label = g.label .. "·" .. c.name
-                end
-                entries[#entries + 1] = {
-                    text = label,
-                    callback = function()
-                        st.category_id = c and tonumber(c.category_id) or -1
-                        st.category_name = c and c.name or _("全部")
-                        menu._store_subtitle = Store.gender_label(st.gender) .. "·" .. st.category_name
-                        reload_from_head(plugin, menu)
-                    end,
-                }
-            end
+        local function apply(c)
+            st.category_id = c and tonumber(c.category_id) or -1
+            st.category_name = c and c.name or _("全部")
+            menu._store_subtitle = Store.gender_label(st.gender) .. "·" .. st.category_name
+            reload_from_head(plugin, menu)
         end
         StoreView.show_chooser{
             title = T(_("分类 · %1"), Store.gender_label(st.gender)),
-            entries = entries,
+            entries = category_tree_entries(plugin, st.gender, list, apply,
+                function() show_library_categories(plugin, menu) end,
+                { all_first = true }),
         }
     end)
 end
@@ -1279,47 +1345,28 @@ open_rank_category = function(plugin, gender, mold, category, menu)
     return m
 end
 
---- 原创榜的分类入口列表：只取「主分类」，与榜单页列出的 19/18 项集合完全一致
---- （实测两边 category_id 集合逐一相同：男频 19 个、女频 18 个）。
---- 传了 menu 就**原地应用**（不重开菜单）；没传（榜单入口链上来的）才开新菜单。
-local function rank_category_entries(plugin, gender, mold, list, menu)
-    local entries = {}
-    local function on_pick(c)
-        if menu then
-            apply_rank_category(plugin, menu, gender, mold, c)
-        else
-            open_rank_category(plugin, gender, mold, c)
-        end
-    end
-    for _i, c in ipairs(list or {}) do
-        if c.label == "主分类" then
-            entries[#entries + 1] = {
-                text = c.name,
-                callback = function() on_pick(c) end,
-            }
-        end
-    end
-    if #entries == 0 then
-        -- 分类树拿不到「主分类」（接口异常/字段变了）时，别给用户一个空菜单
-        for _i, c in ipairs(list or {}) do
-            entries[#entries + 1] = {
-                text = c.name,
-                callback = function() on_pick(c) end,
-            }
-        end
-    end
-    return entries
-end
-
---- 选分类（只列「主分类」，与榜单页列出的 19/18 项完全一致）。
+--- 选分类（上游 v2.16.26 树状，本地移植）：主分类可点 = 换榜单分类（与榜单页
+--- 列出的 19/18 项集合完全一致）；主题/角色/情节折叠成一行可展开 —— 但 🔴
+--- **榜单接口只认主分类 id**（二级分类回 152B 空表，2026-10-21 探针
+--- `_probe_rank_subcat.sh`），所以点二级分类**跳到该分类的书库列表**
+--- （书库接口真实可用，按最热排序）。
 --- 分类树复用书城那份 `category_list`，不再单独请求榜单接口。
 --- menu 参数：榜单菜单的「换分类」传自己进来 → 选中后原地换，不重开菜单。
 open_rank_categories = function(plugin, gender, mold, menu)
     local rank_label = Store.gender_label(gender) .. Store.rank_mold_label(mold)
     ensure_categories(plugin, gender, function(list)
+        local function pick_main(c)
+            if menu then
+                apply_rank_category(plugin, menu, gender, mold, c)
+            else
+                open_rank_category(plugin, gender, mold, c)
+            end
+        end
         StoreView.show_chooser{
             title = T(_("%1 · 选择分类"), rank_label),
-            entries = rank_category_entries(plugin, gender, mold, list, menu),
+            entries = category_tree_entries(plugin, gender, list, pick_main,
+                function() open_rank_categories(plugin, gender, mold, menu) end,
+                { sub_pick = function(c) open_library(plugin, gender, c, nil) end }),
         }
     end)
 end
@@ -1348,37 +1395,16 @@ local function open_search(plugin, keyword)
 end
 
 local function open_categories(plugin, gender)
-    -- v2.16.0 压平：分组与分类合成**一层**选择器（分组做文字前缀），
-    -- 不再「分组 → 分类」两层弹窗。树复用 ensure_categories 的缓存。
+    -- 上游 v2.16.25 树状折叠（本地移植）：主分类常展开，主题/角色/情节折叠成
+    -- 一行点击展开（见 category_tree_entries；旧版压平 150+ 条要翻十几页，没法扫）。
+    -- 树复用 ensure_categories 的缓存。
     ensure_categories(plugin, gender, function(list)
-        local entries = {}
-        local groups = Store.group_categories(list)
-        for _i, g in ipairs(groups) do
-            -- 组间分隔头（不可点），同 show_library_categories —— 压平列表没有分组头没法扫
-            entries[#entries + 1] = {
-                separator = true,
-                text = T(_("── %1（%2）──"), g.label, tostring(#(g.items or {}))),
-            }
-            for _j, c in ipairs(g.items or {}) do
-                local label = c.name
-                if g.label ~= "主分类" then
-                    label = g.label .. "·" .. c.name
-                end
-                entries[#entries + 1] = {
-                    text = label,
-                    callback = function() open_library(plugin, gender, c) end,
-                }
-            end
-        end
-        if #entries == 0 then
-            entries[1] = { text = _("（没有分类）") }
-        end
-        entries[#entries + 1] = { text = _("全部"), callback = function()
-            open_library(plugin, gender, nil, nil)
-        end }
         StoreView.show_chooser{
             title = T(_("分类 · %1"), Store.gender_label(gender)),
-            entries = entries,
+            entries = category_tree_entries(plugin, gender, list,
+                function(c) open_library(plugin, gender, c, nil) end,
+                function() open_categories(plugin, gender) end,
+                { all_last = true }),
         }
     end)
 end

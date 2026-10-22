@@ -189,6 +189,46 @@
 - **EXC-002 弱网超时 ✅**：hosts 黑洞 `novelfm-hl.snssdk.com` → 10.255.255.1 模拟超时 → mget 请求 20s 超时上限（`code=timeout elapsed=20102ms`）→ 自动回退 official → 可读错误提示；重试再次超时仍正常报错，UI 不永久卡忙碌态
 - 测试后环境已恢复：hosts 清理 + /system remount ro、设备池备份还原（3 台）、WiFi 保持开启、config.lua 未使用
 
+### waydroid 回归（2026-10-20 深夜 ~ 10-21，waydroid Android 13 x86_64，KOReader v2026.07.2-270-g426e932）
+
+本轮在 waydroid 虚拟 Android 环境对 v2.16.23（本地 e0391cd）做全链路冒烟 + 修复验证，覆盖书城/详情/目录/正文/自动续章/预下载/返回书架/启动页/书源管理/设置持久化。部署要点：x86_64 APK 替换 arm64 构建（后者白屏无界面）；`appops set org.koreader.launcher MANAGE_EXTERNAL_STORAGE allow` 授予存储权限。
+
+- **菜单入口 ✅**：插件经 MenuSorter orphan 归属「工具」菜单第 2 页「番茄小说」
+- **搜索/详情/目录 ✅**：搜索「1」返回 10 条结果；详情对话框（简介/开始阅读/章节目录/下载）正常；1496 章《十日终焉》目录首次获取因子进程 60s 超时失败（waydroid DNS 偶发慢 + 小屏），重试成功（125 页）
+- **正文/自动续章/预下载 ✅**：详情 → 开始阅读正文渲染正常；章末自动切章；后续章节后台预下载
+- **返回书架 ✅**：阅读菜单「返回书架」回书架上次停留页并保持排序/搜索关键字；不闪文件管理器、不退出 App
+- **启动页 ✅**：初始页面设为番茄书架后重启直接进书架；改回文件管理器需重启 KOReader 生效（`Startup.syncKoreaderStartWith` 仅在 FileManager 插件 init 时执行；直接改 settings 文件须先 force-stop，否则被内存缓存覆盖）
+- **书源管理 ✅**：设备池显示 2 台；设置持久化正常
+- **修复 4 个 bug**：
+  1. `appsource.lua` `put_status` local 定义在 search/get_book_info 调用点**之后** → 搜索必报 `attempt to call global 'put_status' (a nil value)`；定义前移至 get_book_info 之前后复测通过（已全仓扫描，无其他同类 local 前向引用）
+  2. `_meta.lua` 移除 KOReader 2026.07 已废弃的 `name` 字段（启动警告 `name in _meta.lua, is deprecated and will be ignored`）
+  3. `main.lua` 设置页「Upload progress on close」「config.lua loaded.」两处英文文案中文化（i18n.lua 的 `I18n.tr` 全仓零调用为死代码，故直接改源串）
+  4. `async.lua` 子进程超时回调文案 "async timeout" → 「请求超时，请检查网络后重试」
+- **环境备注**：waydroid 网络间歇断连导致偶发「transport_request连接失败： wantread」/「Network is unreachable」，重试即恢复，非插件缺陷；adb `input text` 无法注入中文（NullPointerException），搜索改用「1」验证全链路；书架真实数据需扫码登录 Cookie，本轮以注入临时 shelf_cache 验证显示层（已清理）
+
+### 上游 v2.16.24~26 定向移植（2026-10-22，离线 luajit 单测）
+
+按「保持双轨、只挑功能」的方案（方案 B）把上游 `hesan1232/fanqie.koplugin` 三个小版本的**功能改动**移植进本地重写分支，不带其提交历史。跳过项：上游 v2.16.24 的「加入书架每章都弹」修复——本地已有更稳的 `switching_document` + token 超时实现，语义等价且不依赖 `UIManager` 调度时序。
+
+| 上游版本 | 功能 | 落地文件 | 本机验证 |
+|---|---|---|---|
+| v2.16.24 | 书城网格第一行压住排序/状态胶囊 | `cover_cell.lua`（整格内容顶部对齐，去掉居中容器） | 静态核对与上游一致 ✅ |
+| v2.16.24 | 段评「整段可点」+ 老缓存就地升级 | `content.lua`（`CHAPTER_FORMAT`/`PARA_CSS`/`wrap_para_hits`/`upgrade_chapter_file`）、`settings.lua`、`download.lua`、`main.lua`（4 处 fetch_opts + 设置项） | 27 项单测 ✅ |
+| v2.16.25 | 分类/榜单分类选择器改树状折叠 | `store_ui.lua`（`category_tree_entries`，三入口复用） | 30 项单测 ✅ |
+| v2.16.26 | 段评整段标记改虚线 border | `content.lua`（`PARA_CSS` + format<2 就地转换） | 同上 27 项 ✅ |
+
+- 单测覆盖：气泡还原后按气泡切段（不产生嵌套 `<a>`）、`chapter_meta` 读头 600B、升级幂等、关→开→关的样式/锚点往返、无主分类时退回压平、男/女频折叠状态隔离、榜单二级分类走 `sub_pick`（跳书库而非换榜）
+- **真机验证（waydroid Android 13 x86_64，KOReader v2026.07.2，2026-10-22）**：
+  - 设置页「段评整段可点」✅ 出现且默认勾选
+  - 书城分类树 ✅ 主分类（19）常展开；`▸ 主题（33）/▸ 角色（22）/▸ 情节（80）` 折叠；点「情节」展开后页数 2→7、二级条目全角缩进；折叠状态跨入口保持
+  - 榜单分类树 ✅ 二级分类「洪荒」点击后跳到**书库列表**（标题 `书城·男频·洪荒`，10000 本），未走榜单接口
+  - 书城网格 ✅ 3×3 下首行封面不再压住排序/状态胶囊
+  - 老缓存就地升级 ✅ 设备上 v2.16.23 旧格式章节（无 `fanqie-format`）打开后写入 `format=2`，样式换成 `0.72em` + `border-bottom-style: dashed`，正文未动
+  - ⚠️ 顺带发现并修复一个**移植缺口**：本地重写的打开链路「先查缓存索引，命中直接用」，不经过 `find_chapter_file`，导致只在后者里挂的升级对绝大多数章节不生效。已抽出 `Content.ensure_chapter_upgraded`，接入全部 4 处缓存命中点 + `showReaderUI` 兜底
+  - ⚠️ 未能验证：段评「整段可点」的实际点击（设备上现有缓存章节均无段评气泡；开关打开后需重新联网取章节，本轮网络受限）
+  - ✅ **修复既有缺陷**：文件管理器主菜单里从来没有「番茄小说」。根因是 `addToMainMenu` 写成 `if self.ui.document and isCurrentDocFanqie()`，而 KOReader 为 FileManager 和 ReaderUI **各建一个插件实例**，文件管理器实例的 `self.ui.document` 恒为 nil ⇒ 直接跳过注册。上游 v2.16.23/v2.16.26 同样有此问题。已抽出 `FanQiePlugin:getMainMenuScope()` 按实例分流（`filemanager` / `reader` / `nil`），并加「是否为当前活动 UI」校验，避免关闭后残留实例误注册。真机复测：文件管理器「工具 → 第 2 页 → 番茄小说」✅、阅读端「设置 → 第 2 页 → 番茄小说」✅
+  - ⚠️ 设备环境：KOReader 应用重装后 uid 由 10121 变为 10131，`/sdcard/koreader/` 下资源仍属旧 uid ⇒ 插件日志文件写不进去（不影响功能）
+
 ## 建议真机执行顺序
 
 1. **P0 冒烟**（首次部署必测）：APP-001 → CT-001 → MS-005 → EXC-001 → DT-002 → APP-002
@@ -205,4 +245,5 @@
 | 2026-10-15 | CT-005/UI-003 | AInote 墨水屏 | 批量下载全书不可取消：进度框无取消按钮，进行中按返回键下载不中断（13% 时按返回，继续下载至 100% 完成） | `[Download] finish: downloaded=61 failed=0 skipped=7 cancelled=false` | 已记录；修复：进度框增加「取消」按钮并设置下载循环的 cancel 标志（日志字段已预留 `cancelled`） |
 | 2026-10-15 | CT-005 | AInote 墨水屏 | 下载进度框标题显示原始占位符「下载 %s」；完成提示显示「跳过已缓存 %d 章」 | 截图 OCR 直出未格式化文本 | 已记录；修复：补 string.format 参数替换 |
 | 2026-10-15 | CT-007 | AInote 墨水屏 | 缓存章节 HTML 尾部 `</body></html>` 重复闭合一次（2×`</body>` 2×`</html>`） | 抽检 ch1/5/7 均复现 | 已记录；crengine 容错不影响渲染；修复：查 content.lua 包裹 HTML 模板拼接处 |
+| 2026-10-21 | SR-001 | waydroid Android 13 x86_64 | 搜索任意关键词必崩 | `appsource.lua:542: attempt to call global 'put_status' (a nil value)` | 已修复：`put_status` local 定义原在 search/get_book_info 调用点之后，Lua 前向引用到全局 nil；前移至 get_book_info 之前 |
 |      |          |           |      |                |      |

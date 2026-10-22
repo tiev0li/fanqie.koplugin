@@ -565,153 +565,45 @@ function FanQiePlugin:safeCallback(label, callback)
     end
 end
 
+--- 当前这个插件实例应该注册哪套主菜单？
+---
+--- KOReader 会为 **FileManager 和 ReaderUI 各建一个插件实例**，两边都会调
+--- `addToMainMenu`（见 filemanagermenu.lua / readermenu.lua 的 `setUpdateItemTable`）。
+--- 所以这里必须按「谁在调我」分流，而不是只看 `self.ui.document`：
+---   * `"filemanager"` ⇒ 通用主菜单（书架 / 书城 / 搜索 / 发现 / 下载管理 / 设置 …）
+---   * `"reader"`      ⇒ 阅读菜单（返回书架 / 目录 / 段评 / 重新获取本章节 …）
+---   * `nil`           ⇒ 不注册
+---
+--- 🔴 回归背景：以前写成 `if self.ui.document and isCurrentDocFanqie()`，文件管理器
+---    实例的 `self.ui.document` 永远是 nil ⇒ 文件管理器主菜单里永远没有「番茄小说」
+---    （书城/书架/设置只能从别处进）。上游 v2.16.23/v2.16.26 同样有此问题。
+---
+--- ⚠️ 两侧都要确认「自己是不是**当前活动**的 UI」：
+---    * 阅读端：`ReaderUI.instance` 在 `onCloseWidget`（`UI:close()` 之后）才清空，
+---      而 ReaderUI 关闭前会先 `PluginLoader:finalize()` 丢掉旧实例引用 —— 先后不保证，
+---      只判 `self.ui.document` 可能读到「已关闭但 document 还在」的旧实例。
+---    * 文件管理器：关掉 FileManager 进阅读后它的实例仍然存活
+---      （`FileManager.instance` 在 `onCloseWidget` 里才置 nil），此时若还注册，
+---      会把整个通用菜单塞进阅读器菜单里。
+---@return string|nil "filemanager" | "reader" | nil
+function FanQiePlugin:getMainMenuScope()
+    local ui = self.ui
+    if not (ui and ui.document) then
+        -- 文件管理器实例。`FileManager.instance` 在早期构建期可能还没赋值 ⇒ 按「是我」放行。
+        local ok_fm, FM = pcall(require, "apps/filemanager/filemanager")
+        if ok_fm and FM and FM.instance and FM.instance ~= ui then return nil end
+        return "filemanager"
+    end
+    local ok_rui, RUI = pcall(require, "apps/reader/readerui")
+    if not (ok_rui and RUI and RUI.instance == ui) then return nil end
+    if not self:isCurrentDocFanqie() then return nil end
+    return "reader"
+end
+
+
 function FanQiePlugin:addToMainMenu(menu_items)
-    -- 🔴 这里**不能**再卡 `_state.current_book`：它不持久化，重启后从
-    --    「最近阅读 / 文件管理器」直接打开章节续读时是 nil，而
-    --    `isCurrentDocFanqie()`（看路径里有没有 /fanqie/）仍然为真 ——
-    --    多卡一个条件会让整个阅读端菜单（含「加入/移出书架」）凭空消失。
-    if self.ui.document and self:isCurrentDocFanqie() then
-        menu_items.fanqie = {
-            text = _("番茄小说"),
-            sorting_hint = "tools",
-            sub_item_table_func = function()
-                return {
-                    {
-                        -- 放在阅读菜单**第一项**：读番茄书时「回书架」是最高频动作，
-                        -- 和「继续读」构成一个来回。
-                        text = _("返回书架"),
-                        callback = self:safeCallback(_("返回书架"), function()
-                            self:returnToBookshelf({ force_refresh = false })
-                        end),
-                    },
-                    {
-                        text = _("书架"),
-                        callback = self:safeCallback(_("书架"), function()
-                            self:showBookshelf()
-                        end),
-                    },
-                    {
-                        text = _("书城"),
-                        callback = self:safeCallback(_("书城"), function()
-                            self:showStore()
-                        end),
-                    },
-                    {
-                        -- 阅读界面里「我在读的是什么」的入口（v2.17.0）。
-                        -- 判据与「加入/移出书架」「目录」同源：优先内存里的
-                        -- _state.current_book，没有就从文档路径反推 + 本地书架缓存补全
-                        -- （重启续读场景），全程零网络。详见 showCurrentBookInfo。
-                        text = _("书籍信息"),
-                        callback = self:safeCallback(_("书籍信息"), function()
-                            self:showCurrentBookInfo()
-                        end),
-                    },
-                    {
-                        text = _("目录"),
-                        callback = self:safeCallback(_("目录"), function()
-                            -- onShowFanQieToc 需要 current_book + 章节表（都在内存里）；
-                            -- 重启续读时两者皆无，事件发出去没人接 ⇒ 显式提示比静默好。
-                            if not (_state.current_book and _state.current_chapters) then
-                                self:showInfo(_("请先从书架或书城打开这本书"))
-                                return
-                            end
-                            self.ui:handleEvent(Event:new("ShowFanQieToc"))
-                        end),
-                    },
-                    {
-                        text = _("下载"),
-                        callback = self:safeCallback(_("下载"), function()
-                            local book = _state.current_book
-                            if not book then self:showInfo(_("无书籍信息")); return end
-                            local chapters = _state.current_chapters
-                            if not chapters or #chapters == 0 then
-                                -- 子进程获取目录，UI 线程保持响应
-                                self:showBusy(_("正在获取目录..."))
-                                local client = self.client
-                                local book_id = book.book_id
-                                Async.run(function()
-                                    local b = { book_id = book_id }
-                                    return Content.fetch_catalog(client, b)
-                                end, function(ok_cat, result, err)
-                                    self:closeBusy()
-                                    if not ok_cat or type(result) ~= "table" or #result == 0 then
-                                        self:showInfo(_("获取目录失败"))
-                                        return
-                                    end
-                                    _state.current_chapters = result
-                                    local Download = require("fanqie.download")
-                                    Download.showOptionsDialog(self, book, result,
-                                        { current_index = _state.current_chapter_index })
-                                end, { poll_interval = 0.3, timeout = 60 })
-                                return
-                            end
-                            local Download = require("fanqie.download")
-                            Download.showOptionsDialog(self, book, chapters,
-                                { current_index = _state.current_chapter_index })
-                        end),
-                    },
-                    {
-                        -- 阅读界面直接管理当前这本书的书架状态（v2.12.0）。
-                        -- 🔴 文案按**实际书架状态**给（v2.16.0）。以前一律写
-                        --    「加入/移出书架」，等于把两个方向摆在一起让用户自己猜 ——
-                        --    在架的书该显示「移出书架」、不在架的该显示「加入书架」。
-                        --    判据是 `_state` 的书架快照（纯内存 O(1)，见 state.lua），
-                        --    在 `text_func` 里**同步**求值：koreader 的
-                        --    `Menu.getMenuText` 每次 `updateItems` 都会调用它
-                        --    ⇒ 菜单一打开，方向就是对的。
-                        -- 未知（冷启动且本地没有书架缓存）时乐观显示「加入书架」：
-                        --    加入是可逆的，而「移出书架」是破坏性动作 —— 宁可猜前者。
-                        --    （点击后 `toggleCurrentBookShelf` 仍会先 shelf_check 复核，
-                        --      所以即便猜错也不会做错事，只是文案多一次翻转。）
-                        text_func = function()
-                            if self:isCurrentBookOnShelf() == true then
-                                return _("移出书架")
-                            end
-                            return _("加入书架")
-                        end,
-                        callback = self:safeCallback(_("加入/移出书架"), function()
-                            self:toggleCurrentBookShelf()
-                        end),
-                    },
-                    {
-                        text = _("设置"),
-                        sub_item_table_func = function()
-                            return self:getSettingsMenuItems()
-                        end,
-                    },
-                    {
-                        text = _("缓存管理"),
-                        sub_item_table_func = function()
-                            return self:getCacheMenuItems()
-                        end,
-                    },
-                    {
-                        text = _("在线更新"),
-                        sub_item_table_func = function()
-                            return self:getUpdateMenuItems()
-                        end,
-                    },
-                    {
-                        text = _("重新获取本章节"),
-                        callback = self:safeCallback(_("重新获取本章节"), function()
-                            self:reloadCurrentChapter()
-                        end),
-                    },
-                    {
-                        text = _("关于"),
-                        callback = self:safeCallback(_("关于"), function()
-                            -- cover_cell 构建标记：同主菜单「关于」（见 getMainMenuItems）
-                            local ok_cc, CCm = pcall(require, "fanqie.cover_cell")
-                            local build_note = (ok_cc and CCm and CCm.BUILD)
-                                and T(_("（cover_cell 构建 %1）"), CCm.BUILD) or ""
-                            self:showInfo(T(Info and Info.about_template or _("番茄小说插件 v%1"), self.version, self.settings:get_download_dir())
-                                .. build_note)
-                        end),
-                    },
-                }
-            end,
-        }
-    else
+    local scope = self:getMainMenuScope()
+    if scope == "filemanager" then
         menu_items.fanqie = {
             text = _("番茄小说"),
             sorting_hint = "tools",
@@ -719,7 +611,149 @@ function FanQiePlugin:addToMainMenu(menu_items)
                 return self:getMainMenuItems()
             end,
         }
+        return
     end
+    if scope ~= "reader" then return end
+    menu_items.fanqie = {
+        text = _("番茄小说"),
+        sorting_hint = "tools",
+        sub_item_table_func = function()
+            return {
+                {
+                    -- 放在阅读菜单**第一项**：读番茄书时「回书架」是最高频动作，
+                    -- 和「继续读」构成一个来回。
+                    text = _("返回书架"),
+                    callback = self:safeCallback(_("返回书架"), function()
+                        self:returnToBookshelf({ force_refresh = false })
+                    end),
+                },
+                {
+                    text = _("书架"),
+                    callback = self:safeCallback(_("书架"), function()
+                        self:showBookshelf()
+                    end),
+                },
+                {
+                    text = _("书城"),
+                    callback = self:safeCallback(_("书城"), function()
+                        self:showStore()
+                    end),
+                },
+                {
+                    -- 阅读界面里「我在读的是什么」的入口（v2.17.0）。
+                    -- 判据与「加入/移出书架」「目录」同源：优先内存里的
+                    -- _state.current_book，没有就从文档路径反推 + 本地书架缓存补全
+                    -- （重启续读场景），全程零网络。详见 showCurrentBookInfo。
+                    text = _("书籍信息"),
+                    callback = self:safeCallback(_("书籍信息"), function()
+                        self:showCurrentBookInfo()
+                    end),
+                },
+                {
+                    text = _("目录"),
+                    callback = self:safeCallback(_("目录"), function()
+                        -- onShowFanQieToc 需要 current_book + 章节表（都在内存里）；
+                        -- 重启续读时两者皆无，事件发出去没人接 ⇒ 显式提示比静默好。
+                        if not (_state.current_book and _state.current_chapters) then
+                            self:showInfo(_("请先从书架或书城打开这本书"))
+                            return
+                        end
+                        self.ui:handleEvent(Event:new("ShowFanQieToc"))
+                    end),
+                },
+                {
+                    text = _("下载"),
+                    callback = self:safeCallback(_("下载"), function()
+                        local book = _state.current_book
+                        if not book then self:showInfo(_("无书籍信息")); return end
+                        local chapters = _state.current_chapters
+                        if not chapters or #chapters == 0 then
+                            -- 子进程获取目录，UI 线程保持响应
+                            self:showBusy(_("正在获取目录..."))
+                            local client = self.client
+                            local book_id = book.book_id
+                            Async.run(function()
+                                local b = { book_id = book_id }
+                                return Content.fetch_catalog(client, b)
+                            end, function(ok_cat, result, err)
+                                self:closeBusy()
+                                if not ok_cat or type(result) ~= "table" or #result == 0 then
+                                    self:showInfo(_("获取目录失败"))
+                                    return
+                                end
+                                _state.current_chapters = result
+                                local Download = require("fanqie.download")
+                                Download.showOptionsDialog(self, book, result,
+                                    { current_index = _state.current_chapter_index })
+                            end, { poll_interval = 0.3, timeout = 60 })
+                            return
+                        end
+                        local Download = require("fanqie.download")
+                        Download.showOptionsDialog(self, book, chapters,
+                            { current_index = _state.current_chapter_index })
+                    end),
+                },
+                {
+                    -- 阅读界面直接管理当前这本书的书架状态（v2.12.0）。
+                    -- 🔴 文案按**实际书架状态**给（v2.16.0）。以前一律写
+                    --    「加入/移出书架」，等于把两个方向摆在一起让用户自己猜 ——
+                    --    在架的书该显示「移出书架」、不在架的该显示「加入书架」。
+                    --    判据是 `_state` 的书架快照（纯内存 O(1)，见 state.lua），
+                    --    在 `text_func` 里**同步**求值：koreader 的
+                    --    `Menu.getMenuText` 每次 `updateItems` 都会调用它
+                    --    ⇒ 菜单一打开，方向就是对的。
+                    -- 未知（冷启动且本地没有书架缓存）时乐观显示「加入书架」：
+                    --    加入是可逆的，而「移出书架」是破坏性动作 —— 宁可猜前者。
+                    --    （点击后 `toggleCurrentBookShelf` 仍会先 shelf_check 复核，
+                    --      所以即便猜错也不会做错事，只是文案多一次翻转。）
+                    text_func = function()
+                        if self:isCurrentBookOnShelf() == true then
+                            return _("移出书架")
+                        end
+                        return _("加入书架")
+                    end,
+                    callback = self:safeCallback(_("加入/移出书架"), function()
+                        self:toggleCurrentBookShelf()
+                    end),
+                },
+                {
+                    text = _("设置"),
+                    sub_item_table_func = function()
+                        return self:getSettingsMenuItems()
+                    end,
+                },
+                {
+                    text = _("缓存管理"),
+                    sub_item_table_func = function()
+                        return self:getCacheMenuItems()
+                    end,
+                },
+                {
+                    text = _("在线更新"),
+                    sub_item_table_func = function()
+                        return self:getUpdateMenuItems()
+                    end,
+                },
+                {
+                    text = _("重新获取本章节"),
+                    callback = self:safeCallback(_("重新获取本章节"), function()
+                        self:reloadCurrentChapter()
+                    end),
+                },
+                {
+                    text = _("关于"),
+                    callback = self:safeCallback(_("关于"), function()
+                        -- cover_cell 构建标记：同主菜单「关于」（见 getMainMenuItems）
+                        local ok_cc, CCm = pcall(require, "fanqie.cover_cell")
+                        local build_note = (ok_cc and CCm and CCm.BUILD)
+                            and T(_("（cover_cell 构建 %1）"), CCm.BUILD) or ""
+                        self:showInfo(T(Info and Info.about_template or _("番茄小说插件 v%1"), self.version, self.settings:get_download_dir())
+                            .. build_note)
+                    end),
+                },
+            }
+        end,
+    }
 end
 
 -- ===========================================================================
@@ -2515,6 +2549,21 @@ function FanQiePlugin:getSettingsMenuItems()
             keep_menu_open = true,
             callback = function()
                 _state.setReviewEnabled(not _state.isReviewEnabled())
+            end,
+        },
+        {
+            -- v2.16.24：段评数字是上标小字，单独点不好点 ⇒ 有段评的段落整段可点
+            -- （段落带虚线下划线提示）。关掉后只认那个数字。
+            text = _("段评整段可点"),
+            checked_func = function()
+                return self.settings:getParaTapWhole() ~= false
+            end,
+            keep_menu_open = true,
+            callback = function()
+                self.settings:setParaTapWhole(not (self.settings:getParaTapWhole() ~= false))
+                -- 已有缓存章节在打开时会按结构版本 / 开关**就地升级或回退**（见
+                -- Content.upgrade_chapter_file），下次打开老章节即生效。
+                self:showInfo(_("已保存。重新打开章节后生效。"))
             end,
         },
         {
@@ -5107,10 +5156,16 @@ function FanQiePlugin:navigateToChapter(book, chapters, chapter_index, opts)
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
+    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- （点段落任意位置即可打开该段评论），设置里可关。
+    if self.settings and self.settings.getParaTapWhole then
+        fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
+    end
 
     local item_id = tostring(chapter.itemId)
     local cached_chapters = getCachedChapters(self, book)
-    local existing_path = cached_chapters[item_id]
+    -- 索引命中也要按结构版本/整段可点开关就地升级（见 Content.ensure_chapter_upgraded）
+    local existing_path = Content.ensure_chapter_upgraded(self.settings, cached_chapters[item_id])
 
     -- 已缓存正文直接使用：段评数据缺失不触发重下（有些章节本就无段评）。
     -- 想要段评的用户可通过「重新获取本章节」手动重下（按当前段评开关决定是否带段评）。
@@ -5220,6 +5275,12 @@ end
 
 function FanQiePlugin:showReaderUI(path, chapter)
     local ReaderUI = require("apps/reader/readerui")
+
+    -- 🔴 打开前的最后一道升级闸门：所有章节打开路径（首次打开 / 上一章 / 下一章 /
+    --    预下载命中 / 文件系统兜底）最终都汇集到这里，在这里升级能保证不遗漏。
+    --    上面几处 ensure_chapter_upgraded 仍然保留：它们还会把升级后的状态带给
+    --    各自的后续逻辑，而这里的调用是幂等的（已升级过 → 一个字节都不动）。
+    path = Content.ensure_chapter_upgraded(self.settings, path)
 
     -- 章节切换已完成（新文档即将加载），清除导航标志
     _state.setChapterNavigating(false)
@@ -5352,6 +5413,11 @@ function FanQiePlugin:preDownloadChapters(book, chapters, current_index)
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
+    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- （点段落任意位置即可打开该段评论），设置里可关。
+    if self.settings and self.settings.getParaTapWhole then
+        fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
+    end
 
     local cached_chapters = getCachedChapters(self, book)
     local client = self.client
@@ -5660,7 +5726,8 @@ function FanQiePlugin:onFanQiePrevChapter()
 
     local item_id = tostring(prev_chapter.itemId)
     local cached_chapters = getCachedChapters(self, book)
-    local existing_path = cached_chapters[item_id]
+    -- 索引命中也要就地升级（见 Content.ensure_chapter_upgraded）
+    local existing_path = Content.ensure_chapter_upgraded(self.settings, cached_chapters[item_id])
     local path = existing_path
 
     -- 段评模式：段评开关决定首次下载是否带段评；已缓存正文直接用，缺段评不重下
@@ -5672,6 +5739,11 @@ function FanQiePlugin:onFanQiePrevChapter()
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
+    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- （点段落任意位置即可打开该段评论），设置里可关。
+    if self.settings and self.settings.getParaTapWhole then
+        fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
+    end
 
     -- 下载完成后的跳章逻辑（缓存命中与异步下载共用）
     local function finish_prev(p)
@@ -5794,6 +5866,11 @@ function FanQiePlugin:onEndOfBook()
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
+    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- （点段落任意位置即可打开该段评论），设置里可关。
+    if self.settings and self.settings.getParaTapWhole then
+        fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
+    end
 
     -- 下载完成后的跳章逻辑（缓存命中与异步下载共用）
     local function finish_next(p)
@@ -5814,7 +5891,8 @@ function FanQiePlugin:onEndOfBook()
     -- 解析下一章缓存路径（已缓存正文直接用，缺段评不重下；文件系统回退查找）
     local function resolve_cached_path()
         local cached_chapters = getCachedChapters(self, book)
-        local p = cached_chapters[item_id]
+        -- 索引命中也要就地升级（见 Content.ensure_chapter_upgraded）
+        local p = Content.ensure_chapter_upgraded(self.settings, cached_chapters[item_id])
         if p and H.file_exists(p) then
             return p
         end
