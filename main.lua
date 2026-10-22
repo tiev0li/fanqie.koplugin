@@ -1,3 +1,26 @@
+-- main.lua —— 插件主入口与编排层（FanQiePlugin，WidgetContainer 子类）。
+--
+-- 本文件负责：
+--   · 模块加载：全部走 safe_require（可选模块失败只警告不致命；logger 缺失时
+--     换 no-op 兜底表，避免二次崩溃）
+--   · 插件生命周期：init / onDispatcherRegisterActions / 菜单注册（含 mixin 白名单挂载）
+--   · 业务编排：书架/阅读/下载/段评/进度同步等用户动作的处理函数
+--
+-- 模块分工（细节见各文件头注释）：
+--   fanqie/settings.lua   设置存取与默认值（settings/fanqie.lua）
+--   fanqie/client.lua     网络客户端，所有 HTTP 唯一出口
+--   fanqie/content.lua    章节内容清洗与缓存落盘
+--   fanqie/bookshelf.lua  书架数据源（内存主源 + 文件后备）
+--   fanqie/store.lua      书城网页接口封装       fanqie/store_ui.lua   书城编排（mixin）
+--   fanqie/shelf_view.lua 书架渲染（只渲染）     fanqie/store_view.lua 书城渲染（只渲染）
+--   fanqie/comment_view.lua 段评视图             fanqie/book_detail.lua 详情三接口合并
+--   fanqie/reading/       官方 App 协议（签名/加密/设备池），从阅读 App 书源移植，尽量原样
+--   fanqie/appsource.lua  内置番茄APP源（回退书源 + 搜索/发现）
+--   fanqie/updater*.lua   在线更新               fanqie/state.lua       运行时状态
+--   patches/core.lua      对 KOReader 本体的运行时补丁
+--
+-- ⚠️ 本文件较长，函数分区靠注释横幅导航；改菜单结构时先找 addToMainMenu。
+
 local LOG_MODULE = "[FanQie]"
 
 local function safe_require(module_name, required)

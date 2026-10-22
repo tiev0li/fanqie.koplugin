@@ -1,3 +1,17 @@
+-- fanqie/download_progress.lua —— 批量下载的进度对话框（模态）。
+--
+-- 布局：标题 + 进度条 + 百分比 + 多行状态（阶段 / 章节 N/M / 章节名 / 附加消息）
+-- + 底部「后台运行」「取消下载」两个按钮。
+--
+-- 对外接口：
+--   DownloadProgress:new{ title=, on_cancel=, on_background= } 两个回调二选一必传
+--   :show() / :close()
+--   :setState{ stage=, current=, total=, percent=, chapter=, message= }
+--     stage 取值见 setState 内 labels 表（prepare/catalog/content/images/…）；
+--     内容没变时（签名相同）直接 return，不触发重绘 —— 下载循环按章调用，
+--     这个去重避免了每章白刷一次屏。
+--   :isCanceled() -> 用户是否已点取消
+
 local Blitbuffer = require("ffi/blitbuffer")
 local ButtonTable = require("ui/widget/buttontable")
 local CenterContainer = require("ui/widget/container/centercontainer")

@@ -1,3 +1,22 @@
+-- fanqie/client.lua —— 网络客户端：所有番茄相关 HTTP 请求的唯一出口。
+--
+-- 分层：
+--   · 底层 request/request_follow：luasocket + ssl.https，含超时、重定向、
+--     Set-Cookie 合并持久化（仅在 cookie 变化时 flush，避免批量下载磨损 flash）、
+--     auth 错误识别（401/403 + errCode -2012/-2041 + 中英文「登录」文案）
+--   · 便捷封装：get_json / post_json / get_text / get_binary / web_get_json /
+--     app_get_json（后者带 App 协议头）
+--   · 业务接口：
+--       官方网页/APP —— fetch_shelf_detail（含 5 分钟 SHELF_CACHE 短缓存）、
+--                     fetch_chapter_directory、official_get_content、
+--                     official_get_para_review(-replies)、进度拉取/上传
+--       第三方聚合 —— 晴天(qingtian_*) / 大灰狼(dahuilang_*) 的登录与取文
+--       内置 APP 源 —— fanqie_app_*（转发给 fanqie/appsource.lua）
+--   · 正文统一入口：get_chapter_content_with_fallback —— 按书源优先级逐个尝试
+--
+-- 章节正文的真实抓取走官方 App reading 协议（fanqie/reading/，设备身份 + 签名 +
+-- AES 解密），本层只做编排与降级。书架显示层数据源不在这里 —— 见 bookshelf.lua。
+
 local ltn12 = require("ltn12")
 local Cookie = require("fanqie.cookie")
 local FanQie = require("fanqie.fanqie")

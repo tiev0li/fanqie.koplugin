@@ -1,3 +1,14 @@
+-- fanqie/helper.lua —— 通用工具集（类型判断 / 路径与文件 / JSON / 节流 / 对话框生命周期）。
+--
+-- 本模块不持有任何业务状态，所有函数都是纯工具，供 main.lua 与各 fanqie/* 模块共用。
+-- 分区一览（按文件中横幅注释划分）：
+--   · 基础：类型判断、trim、join_path、文件/目录的建删查
+--   · JSON：json_decode / json_encode（后端 json → rapidjson 只探测一次，失败返回 nil 不抛错）
+--   · 更新器用：file_size、get_data_dir、unzip_file（纯 Lua 解压，含路径穿越防护）
+--   · 缓存偏好：cache_table / prefetch_count —— settings.cache 的唯一读取口径（见该节 🔴 注释）
+--   · 下载节流：request_gap / request_jitter / batch_rest / next_request_delay
+--   · UIManager：widget_shown / close_widget —— 防止「重复 close 凭空闪屏」（见该节 🔴 注释）
+
 local lfs = require("libs/libkoreader-lfs")
 local util = require("util")
 local DataStorage = require("datastorage")

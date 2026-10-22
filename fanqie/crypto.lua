@@ -1,3 +1,17 @@
+-- fanqie/crypto.lua —— 纯 Lua MD5 实现（输出小写 hex）。
+--
+-- 为什么不直接用系统库：KOReader 各平台构建携带的加密库不一致（有的有 openssl
+-- ffi、有的没有），而签名体系里只需要 MD5，自实现一份最省心、零依赖。
+--
+-- 位运算优先用 LuaJIT 的 bit 库（Kindle/Kobo/Android 的 KOReader 都是 LuaJIT，
+-- 必定命中）；万一 require "bit" 失败则退到纯算术实现（慢但正确，仅作兜底）。
+--
+-- 对外接口：
+--   Crypto.md5_hex(message) -> 32 字符小写 hex
+-- 被 fanqie/appcrypto.lua（App 签名体系）引用。注意与 fanqie/reading/crypto.lua
+-- 是两份独立实现：reading/ 目录是从阅读 App 书源移植的模块，保持原样便于对照上游；
+-- 本文件是主插件侧的公共实现，不要合并两者。
+
 local ok_bit, bit = pcall(require, "bit")
 if not ok_bit then
     local function toUInt32(x)

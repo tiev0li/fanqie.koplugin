@@ -433,7 +433,7 @@ return {
 3. **风险自担**：使用本插件**可能违反第三方平台的服务条款**。是否能使用、使用多久、是否触发风控，均由第三方平台决定，作者无法控制也不作任何承诺。因使用本插件产生的一切后果（包括但不限于账号受限或封禁、IP 被限制、数据丢失、设备异常、任何直接或间接损失）**均由用户自行承担，作者不承担任何责任**。
 4. **版权与侵权处理**：本插件**无意侵害任何人的合法权益**。请**尊重版权、支持正版**，在官方渠道阅读与购买。若任何权利人认为本项目不妥或涉及侵权，请**联系作者**，作者将在核实后**立即删除相关内容**或停止维护。
 5. **无担保**：本插件按「**现状（AS IS）**」提供，不附带任何明示或暗示的担保（包括但不限于适销性、特定用途适用性与非侵权保证）。作者**不保证**其可用性、稳定性、准确性、安全性或后续维护，也不对任何使用后果负责。
-6. **与软件许可的关系**：本项目的 [MIT License](#许可证) 仅授予你对**本插件源代码**的使用许可，**不构成**对任何第三方内容、商标、接口或服务的授权。
+6. **与软件许可的关系**：本项目的 [GPL-3.0-only](#许可证) 仅授予你对**本插件源代码**的使用许可，**不构成**对任何第三方内容、商标、接口或服务的授权。
 
 ## 常见问题
 
@@ -1639,4 +1639,36 @@ A: 番茄网页接口把部分文案用私用区码位替换过，插件内置�
 
 ## 许可证
 
-MIT License
+GPL-3.0-only（v2.16.22 起由 MIT 变更，详见 LICENSE）
+
+## 代码结构
+
+面向想读源码 / 改功能的人。插件入口是 `main.lua`（FanQiePlugin，编排与菜单），
+业务按「数据层 → 编排层 → 渲染层」拆在 `fanqie/` 下，每个模块的文件头注释
+写清了职责与对外接口。
+
+| 文件 | 职责 |
+|------|------|
+| `main.lua` | 插件入口：模块加载（safe_require）、菜单注册、动作编排、mixin 挂载 |
+| `_meta.lua` / `fanqie/info.lua` | 版本与描述（单一口径在 info.lua，_meta.lua 读取） |
+| `fanqie/settings.lua` | 设置存取、默认值、v3 迁移（`settings/fanqie.lua`） |
+| `fanqie/client.lua` | 网络客户端：所有 HTTP 的唯一出口（官方/晴天/大灰狼/内置APP源） |
+| `fanqie/content.lua` | 章节内容清洗（PUA 解码/HTML 处理）与缓存落盘的唯一口径 |
+| `fanqie/bookshelf.lua` | 书架数据源：内存主源 + 文件后备，刷新成功才换缓存 |
+| `fanqie/book_detail.lua` | 书籍详情：书架 + 详情 + 进度三接口合并 |
+| `fanqie/store.lua` | 书城网页接口封装 + PUA 解码 + 字段归一化 |
+| `fanqie/store_ui.lua` | 书城编排层（main.lua 的白名单 mixin）：分类/榜单/搜索 |
+| `fanqie/shelf_view.lua` / `store_view.lua` | 书架 / 书城**渲染层**：只渲染，不发请求 |
+| `fanqie/cover_cell.lua` / `ui_style.lua` | 封面网格布局与 UI 设计令牌（尺寸/配色/圆角） |
+| `fanqie/comment_view.lua` | 段评视图：可滚动、图片内嵌、回复展开 |
+| `fanqie/reading/` | 官方 App reading 协议（设备身份/ARGUS/Ladon 签名/AES 解密），移植自阅读 App 书源，尽量保持原样便于对照上游 |
+| `fanqie/appsource.lua` / `appcrypto.lua` | 内置番茄APP源（回退书源 + 搜索/发现入口 + 设备池） |
+| `fanqie/state.lua` | 运行时状态（当前书籍/章节/进度的单一事实源） |
+| `fanqie/async.lua` | 子进程异步任务封装（网络请求不卡 UI） |
+| `fanqie/download.lua` / `download_progress.lua` | 批量下载编排与进度对话框 |
+| `fanqie/qrlogin.lua` | 扫码登录（网页 Cookie 获取） |
+| `fanqie/updater*.lua` | 在线更新（HTTP / 安装 / UI 三段） |
+| `fanqie/helper.lua` / `cookie.lua` / `crypto.lua` / `i18n.lua` / `logger.lua` / `img_size.lua` / `digests.lua` | 公共工具与基础设施 |
+| `patches/core.lua` | 对 KOReader 本体的运行时补丁（段评点击、章首边界等） |
+
+数据文件位置（升级插件不受影响）见 [DEPLOY.md](DEPLOY.md) 第 7 节。

@@ -1,3 +1,12 @@
+-- fanqie/cookie.lua —— Cookie 的解析 / 合成 / 合并（纯函数，无状态）。
+--
+-- 对外接口：
+--   parse_cookie_header(header) -> {name=value}   解析 "k1=v1; k2=v2" 形式的 Cookie 头
+--   extract_from_curl(curl)     -> cookie, data   从复制的完整 cURL 命令里抠出 Cookie 和 POST body
+--   to_header(cookies)          -> "k1=v1; k2=v2" 合成请求头（按键排序，保证输出稳定）
+--   merge_set_cookie(cookies, set_cookie)         把响应里的 Set-Cookie 合并进已有表（就地修改并返回）
+--   has_login_cookie(cookies)   -> bool           粗判是否存在有效登录态（任一值长度 >= 8）
+
 local Cookie = {}
 
 function Cookie.parse_cookie_header(header)

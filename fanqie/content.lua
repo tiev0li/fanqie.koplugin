@@ -1,3 +1,20 @@
+-- fanqie/content.lua —— 章节内容与缓存层：从「接口返回」到「可渲染 XHTML」的全部加工。
+--
+-- 职责分组（按函数前缀找）：
+--   · 目录/缓存文件：book_cache_dir、save/load_cache_index、save/load/clear_catalog_cache、
+--     chapter_meta / chapter_format / upgrade_chapter_file（旧格式就地升级，v2.16.24 起）、
+--     find_chapter_file —— 章节 HTML 与 catalog 的落盘/读取唯一口径
+--   · 内容清洗：decode_pua_content（PUA 私用区字符还原）、strip_html、decode_html_entities、
+--     clean_chapter_content、txt_to_xhtml、normalize_chapters / readable_chapters
+--   · 段评：wrap_para_hits（把段评气泡注进正文）、save/load_para_reviews_index
+--   · 图片：detect_image_type（嗅探 PNG/JPEG/WebP/HEIC/SVG…）、download_remote_images、
+--     fix_svg_for_inkscreen / fix_svg_imgs_in_text（SVG 浅色填充在墨水屏上反白，强制改色）
+--   · 漫画：parse_comic_pics / render_comic_pics（book_type=1，AES 解密在 reading/ 侧）
+--   · 抓取编排：fetch_catalog、fetch_chapter_content / fetch_chapter_html（先查缓存，
+--     未命中走 client 抓回、清洗、落盘）
+--
+-- 顶层那两个 local rshift/lshift 是 base64 编解码用的，别删。
+
 local function rshift(n, k)
     return math.floor(n / (2 ^ k))
 end
