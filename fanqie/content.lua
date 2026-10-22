@@ -40,7 +40,7 @@ end
 
 local Content = {}
 
---- 章节 HTML 的**结构版本**（上游 v2.16.24 起，本地移植）。
+--- 章节 HTML 的**结构版本**（v2.16.24 起）。
 ---
 --- 为什么必须要有它：章节 HTML 是**落盘缓存**的（`chapter_<item>.html`），正文样式
 --- 与段评锚点都写在文件里。改了 CSS / 改了锚点形状，已经缓存的章节**不会**跟着变 ——
@@ -52,8 +52,8 @@ local Content = {}
 ---   * 版本相同 ⇒ 一个字节都不碰（只读前 600 字节判断，不读全文）。
 --- 🔴 改动本文件产出的 HTML 结构 / 内置样式时 **+1**，否则老缓存永远不会更新。
 Content.CHAPTER_FORMAT = 2
--- 版本 2 = 上游 v2.16.26：「整段可点」的视觉标记从实线下划线（text-decoration）
--- 换成虚线（border-bottom dashed）。crengine 的 `text-decoration` 只有
+-- v2.16.26 = 2：「整段可点」的视觉标记从实线下划线（text-decoration）换成
+-- 虚线（border-bottom dashed）。crengine 的 `text-decoration` 只有
 -- underline/overline/line-through/blink，没有 style 属性 ⇒ CSS 画不出虚线；
 -- 但内联元素的 border 走 lvtextfm 的 drawBorder，`border-style: dashed`
 -- 会映射成 dot=interval=3×border_width 的虚线（lvtextfm.cpp drawBorder）。
@@ -384,7 +384,6 @@ function Content.clear_catalog_cache(settings, book_id)
     end
 end
 
--- Find a chapter file directly from filesystem, even if cache index is missing
 --- 读缓存章节文件头里的两个标记：结构版本 + 整段锚点开关。
 ---
 --- 只读前 600 字节：两个 meta 都紧跟 `<meta charset>`，一定落在窗口内。
@@ -411,14 +410,10 @@ end
 
 --- 老缓存章节的**就地升级 / 降级**（不联网、不动正文，离线也能生效）。
 ---
---- 四种情况会改写文件，改完都幂等（再调一次什么都不做）：
+--- 三种情况会改写文件，改完都幂等（再调一次什么都不做）：
 ---   1. **结构版本落后**（含「没有这个 meta」的旧文件）：在 `</head>` 前追加一份
 ---      `Content.PARA_CSS` —— 后出现的同名规则覆盖前面的（同优先级按顺序，
 ---      `font-size` 那条还带 `!important`，稳）；
----   1b. **format < 2**：老缓存里「整段可点」的标记还是 v2.16.24 的实线下划线
----      （`text-decoration: underline`），原地换成 v2.16.26 的虚线 border ——
----      全文件只有 para-hit 规则里有 underline（气泡是 none，正文 css 无下划线），
----      按属性串替换即命中且只命中这一处；
 ---   2. **整段锚点状态与当前设置不符**：
 ---      * 设置开 ⇒ 给有段评的段落补 `a.para-hit`（老文件里气泡 href 是
 ---        `fanqie-para:N` 无 `#`，`wrap_para_hits` 两种都认）；
@@ -440,7 +435,7 @@ function Content.upgrade_chapter_file(path, want_hit)
     if cur >= Content.CHAPTER_FORMAT and cur_hit == want then return false end
 
     local ok_size, size = pcall(function()
-        -- 🔴 用 `libs/libkoreader-lfs`，与 get_cache_index 一致：
+        -- 🔴 用 `libs/libkoreader-lfs`，与上面 `get_cache_index` 一致：
         -- 裸 `lfs` 在部分平台上 require 不到 ⇒ pcall 静默失败 ⇒ 体积判断被跳过，
         -- 几 MB 的漫画图集会走整文件读-改-写。
         local lfs = require("libs/libkoreader-lfs")
@@ -500,7 +495,8 @@ function Content.upgrade_chapter_file(path, want_hit)
     return true
 end
 
---- 按「结构版本 / 整段可点开关」就地升级缓存（见 `upgrade_chapter_file`）。
+-- Find a chapter file directly from filesystem, even if cache index is missing.
+--- 顺带按「结构版本 / 整段可点开关」就地升级缓存（见 `upgrade_chapter_file`）。
 --- ⚠️ 升级失败**不影响返回路径**：宁可让用户看到旧样式，也不能让章节打不开。
 --- 章节缓存命中的统一出口：返回路径前先按开关/结构版本**就地升级**。
 ---
@@ -737,7 +733,7 @@ function Content.decode_html_entities(text)
     return text
 end
 
---- 把「有段评的段落」整段变成可点区域（上游 v2.16.24，本地移植）。
+--- 把「有段评的段落」整段变成可点区域（v2.16.24）。
 ---
 --- 背景：段评气泡原来是正文里一个 `0.5em` 的上标数字，用户实测「不太容易点击」。
 --- 现在把段落正文包进一段**自指链接** `<a class="para-hit" href="fanqie-para:#N">`，
@@ -1124,7 +1120,7 @@ function Content.clean_chapter_content(raw_content, title, opts)
         logger.info(LOG_MODULE, "[段评] 气泡还原: restored=" .. restored_count .. "/" .. comment_count)
     end
 
-    -- 整段可点（v2.16.24 移植）：把有段评的段落正文也包成链接，点段落任意位置即可打开
+    -- 整段可点（v2.16.24）：把有段评的段落正文也包成链接，点段落任意位置即可打开
     -- 该段评论（原来是「只能点那个小数字」）。`opts.para_tap_whole == false` 时不做。
     if comment_count > 0 and not (opts and opts.para_tap_whole == false) then
         result = Content.wrap_para_hits(result)
@@ -1871,7 +1867,7 @@ function Content.save_chapter_html(settings, book, chapter, xhtml, assets, css)
     -- 不支持 JavaScript，点击链接后由 patches/core.lua 的 ReaderLink 拦截处理。
     -- 段评样式统一由 `Content.PARA_CSS` 提供（缓存升级与新下载共用一份）。
     --
-    -- `<meta name="fanqie-format">` 是**结构版本**：`Content.chapter_meta` 靠它
+    -- `<meta name="fanqie-format">` 是**结构版本**：`Content.chapter_format` 靠它
     -- 判断缓存是不是旧格式（旧文件没有这个 meta ⇒ 0 ⇒ 打开时就地升级）。
     local html = [[<!DOCTYPE html>
 <html lang="zh-CN">

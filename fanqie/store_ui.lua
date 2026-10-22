@@ -874,7 +874,7 @@ local function ensure_categories(plugin, gender, cb)
     end, { poll_interval = 0.3, timeout = 30, tag = ASYNC_TAG })
 end
 
---- 分类树选择器的**树状折叠**条目构造（上游 v2.16.25，本地移植）。
+--- 分类树选择器的**树状折叠**条目构造（v2.16.25）。
 --- 参考「树状评论区」的展开/收起：主分类（一级）常展开；主题/角色/情节（二级）
 --- 各自折叠成一行「▸ 主题（33）」，点一下展开、再点收起。
 --- 🔴 为什么不压平了：旧版把 150+ 条全铺出来（13~16 页），扫不动；
@@ -882,7 +882,7 @@ end
 ---    `_probe_rank_subcat`：1141 主分类 8372B vs 511/516/1079 二级全空表），
 ---    所以树只做在分类浏览这边，二级分类走书库接口。
 --- 折叠状态按性别记在 plugin 上：选择器关掉再开还留着，男/女频两棵树互不干扰。
----@param on_pick function(category|nil) 选中回调（nil = 「全部」；主分类与「全部」走它）
+---@param on_pick function(category|nil) 选中回调（nil = 「全部」）
 ---@param reshow function() 切换折叠后**重开本选择器**的回调。选择器是静态列表
 ---   没有原地重绘；「关掉重开」是现有选择器交互里最稳的路（换性别/换分类也这么走），
 ---   且 show_chooser 开头自带 close_chooser 防叠加。
@@ -982,8 +982,8 @@ switch_library_gender = function(plugin, menu, gender)
 end
 
 --- tab 的「分类…」：在**当前菜单**上原地换分类（不再一层层弹选择器 → 重开菜单）。
---- 上游 v2.16.25 起树状折叠（本地移植）：主分类常展开，主题/角色/情节折叠成一行
---- 点击展开（见 category_tree_entries；旧版压平 150+ 条要翻十几页，没法扫）。
+--- v2.16.25 起树状折叠：主分类常展开，主题/角色/情节折叠成一行点击展开
+--- （见 category_tree_entries；旧版压平 150+ 条要翻十几页，没法扫）。
 show_library_categories = function(plugin, menu)
     local st = menu._store_state
     if not st then return end
@@ -1345,11 +1345,10 @@ open_rank_category = function(plugin, gender, mold, category, menu)
     return m
 end
 
---- 选分类（上游 v2.16.26 树状，本地移植）：主分类可点 = 换榜单分类（与榜单页
---- 列出的 19/18 项集合完全一致）；主题/角色/情节折叠成一行可展开 —— 但 🔴
---- **榜单接口只认主分类 id**（二级分类回 152B 空表，2026-10-21 探针
---- `_probe_rank_subcat.sh`），所以点二级分类**跳到该分类的书库列表**
---- （书库接口真实可用，按最热排序）。
+--- 选分类（v2.16.26 树状）：主分类可点 = 换榜单分类（与榜单页列出的 19/18 项
+--- 集合完全一致）；主题/角色/情节折叠成一行可展开 —— 但 🔴 **榜单接口只认主分类
+--- id**（二级分类回 152B 空表，2026-10-21 探针 `_probe_rank_subcat.sh`），所以
+--- 点二级分类**跳到该分类的书库列表**（书库接口真实可用，按最热排序）。
 --- 分类树复用书城那份 `category_list`，不再单独请求榜单接口。
 --- menu 参数：榜单菜单的「换分类」传自己进来 → 选中后原地换，不重开菜单。
 open_rank_categories = function(plugin, gender, mold, menu)
@@ -1395,8 +1394,8 @@ local function open_search(plugin, keyword)
 end
 
 local function open_categories(plugin, gender)
-    -- 上游 v2.16.25 树状折叠（本地移植）：主分类常展开，主题/角色/情节折叠成
-    -- 一行点击展开（见 category_tree_entries；旧版压平 150+ 条要翻十几页，没法扫）。
+    -- v2.16.25 树状折叠：主分类常展开，主题/角色/情节折叠成一行点击展开
+    -- （见 category_tree_entries；旧版压平 150+ 条要翻十几页，没法扫）。
     -- 树复用 ensure_categories 的缓存。
     ensure_categories(plugin, gender, function(list)
         StoreView.show_chooser{

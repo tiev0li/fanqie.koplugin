@@ -265,7 +265,7 @@ local FanQiePlugin = WidgetContainer:extend{
     name = "fanqie",
     is_doc_only = false,
     fullname = "FanQie",
-    version = Info and Info.version or "2.16.23",
+    version = Info and Info.version or "2.16.25",
 }
 
 -- Check if the active ReaderUI document is the fanqie chapter we opened.
@@ -600,20 +600,22 @@ function FanQiePlugin:getMainMenuScope()
     return "reader"
 end
 
-
 function FanQiePlugin:addToMainMenu(menu_items)
     local scope = self:getMainMenuScope()
     if scope == "filemanager" then
         menu_items.fanqie = {
-            text = _("番茄小说"),
-            sorting_hint = "tools",
-            sub_item_table_func = function()
-                return self:getMainMenuItems()
-            end,
+        text = _("番茄小说"),
+        sorting_hint = "tools",
+        sub_item_table_func = function()
+            return self:getMainMenuItems()
+        end,
         }
         return
     end
     if scope ~= "reader" then return end
+    -- 读番茄书时注册阅读菜单（含「加入/移出书架」）。
+    -- ⚠️ 这里**不能**再卡 `_state.current_book`：它不持久化，重启后从
+    --    「最近阅读 / 文件管理器」直接打开章节续读时是 nil。
     menu_items.fanqie = {
         text = _("番茄小说"),
         sorting_hint = "tools",
@@ -2553,7 +2555,7 @@ function FanQiePlugin:getSettingsMenuItems()
         },
         {
             -- v2.16.24：段评数字是上标小字，单独点不好点 ⇒ 有段评的段落整段可点
-            -- （段落带虚线下划线提示）。关掉后只认那个数字。
+            -- （段落带下划线提示）。关掉后只认那个数字。
             text = _("段评整段可点"),
             checked_func = function()
                 return self.settings:getParaTapWhole() ~= false
@@ -2561,9 +2563,9 @@ function FanQiePlugin:getSettingsMenuItems()
             keep_menu_open = true,
             callback = function()
                 self.settings:setParaTapWhole(not (self.settings:getParaTapWhole() ~= false))
-                -- 已有缓存章节在打开时会按结构版本 / 开关**就地升级或回退**（见
-                -- Content.upgrade_chapter_file），下次打开老章节即生效。
-                self:showInfo(_("已保存。重新打开章节后生效。"))
+                -- 已有缓存章节在打开时会自动按新开关升级/回退吗？不会 —— 升级只做
+                -- 「补齐」，不删已有的整段锚点。所以这里提示一句，避免用户以为没生效。
+                self:showInfo(_("已保存。新打开（或重新下载）的章节生效。"), 2)
             end,
         },
         {
@@ -4383,6 +4385,11 @@ function FanQiePlugin:_promptAddShelfOnLeave(was_open)
     local book_id = tostring(book.book_id)
     _state.shelf_prompted = _state.shelf_prompted or {}
     if _state.shelf_prompted[book_id] then return end
+    -- 切章 / 换书不是「离开这本书」：用本地 switching_document 标志（见 showReaderUI）。
+    if _state.switching_document then
+        if Log then Log.info("shelf prompt skipped: chapter switch") end
+        return
+    end
 
     local self_ref = self
 
@@ -5156,7 +5163,7 @@ function FanQiePlugin:navigateToChapter(book, chapters, chapter_index, opts)
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
-    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- 段评「整段可点」（v2.16.24）：段落正文也包成锚接
     -- （点段落任意位置即可打开该段评论），设置里可关。
     if self.settings and self.settings.getParaTapWhole then
         fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
@@ -5278,8 +5285,8 @@ function FanQiePlugin:showReaderUI(path, chapter)
 
     -- 🔴 打开前的最后一道升级闸门：所有章节打开路径（首次打开 / 上一章 / 下一章 /
     --    预下载命中 / 文件系统兜底）最终都汇集到这里，在这里升级能保证不遗漏。
-    --    上面几处 ensure_chapter_upgraded 仍然保留：它们还会把升级后的状态带给
-    --    各自的后续逻辑，而这里的调用是幂等的（已升级过 → 一个字节都不动）。
+    --    上面几处 ensure_chapter_upgraded 仍然保留：它们会把升级后的状态带给各自的
+    --    后续逻辑；这里的调用是幂等的（已升级过 → 一个字节都不动）。
     path = Content.ensure_chapter_upgraded(self.settings, path)
 
     -- 章节切换已完成（新文档即将加载），清除导航标志
@@ -5294,6 +5301,7 @@ function FanQiePlugin:showReaderUI(path, chapter)
     _state.switching_document = true
     _state.switching_document_token = (_state.switching_document_token or 0) + 1
     local switch_token = _state.switching_document_token
+
 
     local ok, err = pcall(function()
         -- 不用 switchDocument（其内部先 onClose 再 showReader，中间 forceRePaint 会闪现书架）
@@ -5413,7 +5421,7 @@ function FanQiePlugin:preDownloadChapters(book, chapters, current_index)
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
-    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- 段评「整段可点」（v2.16.24）：段落正文也包成锚接
     -- （点段落任意位置即可打开该段评论），设置里可关。
     if self.settings and self.settings.getParaTapWhole then
         fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
@@ -5739,7 +5747,7 @@ function FanQiePlugin:onFanQiePrevChapter()
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
-    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- 段评「整段可点」（v2.16.24）：段落正文也包成锚接
     -- （点段落任意位置即可打开该段评论），设置里可关。
     if self.settings and self.settings.getParaTapWhole then
         fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
@@ -5866,7 +5874,7 @@ function FanQiePlugin:onEndOfBook()
         heartbeat_path = self:_downloadHeartbeatPath(book),
     }
     if review_enabled then fetch_opts.review = true end
-    -- 段评「整段可点」（v2.16.24 移植）：段落正文也包成锚接
+    -- 段评「整段可点」（v2.16.24）：段落正文也包成锚接
     -- （点段落任意位置即可打开该段评论），设置里可关。
     if self.settings and self.settings.getParaTapWhole then
         fetch_opts.para_tap_whole = self.settings:getParaTapWhole() ~= false
