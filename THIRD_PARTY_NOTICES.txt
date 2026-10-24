@@ -56,5 +56,16 @@ koobone.koplugin 的 updater 为独立实现（仅在设计上参考了觅阅 mi
 KOReader（https://github.com/koreader/koreader）以 GNU AGPLv3 发布。
 本插件通过 KOReader 的插件机制加载并对其 ReaderLink / ReaderToc /
 ReaderPaging / ReaderRolling 打补丁，属于在 AGPLv3 程序内运行。
-GPLv3 与 AGPLv3 相互兼容（AGPLv3 §13），两者的源码要求均已满足：
-本插件的发布包内即为完整 Lua 源码。
+--------------------------------------------------------------------------------
+5. seaneasysaid/fanqie.koplugin-fixed 与随包字体
+--------------------------------------------------------------------------------
+来源：https://github.com/seaneasysaid/fanqie.koplugin-fixed （GPL-3.0-only）
+
+  fanqie/emoticon.lua              ← 段评表情码映射，原样引入
+  fanqie/emoji_font.lua            ← 参考其 review_popup/face_factory.lua 的
+                                    FreeType 字体与回退链构造，针对本仓库评论视图改写
+  设备编号精度、封面缓存与异步收口等修复亦参考该仓库对应提交，按本仓库结构适配。
+
+  fonts/NotoEmoji-Regular.ttf      ← Google Noto Emoji
+    许可：SIL Open Font License 1.1（全文见 fonts/LICENSE）
+    用途：段评界面 emoji 字形回退，随插件一并分发。

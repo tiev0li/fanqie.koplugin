@@ -32,6 +32,9 @@ local M = {
     -- pre_downloading 用于后台预下载，不阻塞阅读，但会被 is_downloading 中断
     pre_downloading = false,
     active_menu = nil,
+    -- 书架请求代际（跨阅读器重建的插件实例共享）：只有最新请求能落缓存/改 UI。
+    shelf_request_generation = 0,
+    shelf_auto_refreshing = false,
     detail_dialog = nil,
     is_downloading = false,
     last_page_number = nil,

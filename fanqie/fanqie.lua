@@ -115,11 +115,18 @@ function FanQie.mobile_cover(thumb)
     local path = thumb:match("(novel%-pic/[^~%?#]+)")
         or thumb:match("(novel%-static/[^~%?#]+)")
     if not path then
-        if thumb:match("^https?://") then
-            return thumb
+        -- 也支持主机下直接是裸哈希的真实封面 URL；仅番茄自己的 byteimg
+        -- 域名可换到无签名 CDN，外部地址必须原样保留。
+        local host, host_path = thumb:match("^https?://([^/]+)/([^?#]+)")
+        if host then
+            if not host:lower():match("byteimg%.com$") then return thumb end
+            path = host_path
+        else
+            path = thumb
         end
-        path = thumb
     end
+    path = path:gsub("^/", ""):gsub("~tplv[^/]*$", "")
+    if path == "" then return nil end
     return FanQie.MOBILE_COVER_CDN .. "/" .. path .. "~tplv-shrink:320:0.image"
 end
 

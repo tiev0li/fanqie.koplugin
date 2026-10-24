@@ -1951,9 +1951,16 @@ local function inject_comment_tags(content, book_id, item_id, stats)
     if type(content) ~= "string" or type(stats) ~= "table" then
         return content, para_reviews
     end
+    local expected, blk_seen = 0, 0
+    for _pid, info in pairs(stats) do
+        if type(info) == "table" and (tonumber(info.count) or 0) > 0 then
+            expected = expected + 1
+        end
+    end
     local out = content:gsub("(<p%s[^>]*>[%s%S]-</p>)", function(seg)
         -- 取 blk 标签的 p_idx（<p> 自身也带 p_idx，但那是 40000 之类的偏移值）
         local pid = tonumber(seg:match('<blk[^>]*p_idx="(%d+)"'))
+        if pid then blk_seen = blk_seen + 1 end
         local info = pid and stats[pid]
         local n = info and (tonumber(info.count) or 0) or 0
         if n > 0 and not seg:find("<comment", 1, true) then
@@ -1964,7 +1971,13 @@ local function inject_comment_tags(content, book_id, item_id, stats)
         end
         return seg
     end)
-    return out, para_reviews
+    local anomaly
+    if expected > 0 and #para_reviews == 0 then
+        anomaly = { expected = expected, injected = 0, blk_seen = blk_seen, kind = "none" }
+    elseif expected >= 10 and #para_reviews * 2 < expected then
+        anomaly = { expected = expected, injected = #para_reviews, blk_seen = blk_seen, kind = "partial" }
+    end
+    return out, para_reviews, anomaly
 end
 
 -- Fetch chapter content via the official FanQie App "reading" protocol.
@@ -2000,12 +2013,17 @@ function Client:official_get_content(book_id, item_id, opts)
             stats_err = ret1
         end
         if stats then
-            local ok_inject, content2, reviews = pcall(
+            local ok_inject, content2, reviews, anomaly = pcall(
                 inject_comment_tags, result.content or "",
                 tostring(book_id), tostring(item_id), stats)
             if ok_inject then
                 result.content = content2
                 para_reviews = reviews or {}
+                if anomaly and ok_logger and logger_mod then
+                    logger_mod.warn(string.format(
+                        "[FanQie] 段评气泡注入异常(%s)：统计命中 %d 段，实际注入 %d 个，正文 blk 标记 %d 处",
+                        tostring(anomaly.kind), anomaly.expected, anomaly.injected, anomaly.blk_seen))
+                end
             end
             if ok_logger and logger_mod then
                 logger_mod.info("[FanQie] 段评统计注入:",

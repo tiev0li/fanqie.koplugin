@@ -211,7 +211,7 @@ end
 --- 从**本地**书架缓存里找一本书的完整记录（零网络）。
 --
 -- 用途：阅读界面的「书籍信息」在「重启后从最近阅读/文件管理器直接打开章节续读」
--- 时拿不到 `_state.current_book`（它不持久化），只有从文档路径反推出来的书号。
+-- 时拿不到 `State.current_book`（它不持久化），只有从文档路径反推出来的书号。
 -- 这时用本地书架缓存把书名/作者/简介/进度补齐 —— 和 ensureShelfSnapshot 一样
 -- **绝不联网**：网络往返会让菜单卡住，而本地文件（或内存缓存）命中是零成本的。
 -- @return table|nil 命中返回原始记录（调用方只读，不要就地改）
@@ -250,7 +250,7 @@ function Bookshelf:showBookshelf(opts)
     -- 排序已移到显示层（fanqie/shelf_view.lua 的 build_items → sort_books）：
     -- 排序键/方向持久化在 settings.shelf，缓存里始终保持接口原始顺序，
     -- 切换排序只需原地重刷列表、且不会污染缓存。
-    -- （旧实现在这里读 _state.shelf_sort_type，而该字段全仓从未被赋值，
+    -- （旧实现在这里读 State.shelf_sort_type，而该字段全仓从未被赋值，
     --   且比较用的 added_time / last_read_time 也从未写入 → 排序恒不生效。已删。）
 
     -- 回退到文件缓存（force_refresh 获取失败时使用）
@@ -273,15 +273,25 @@ function Bookshelf:showBookshelf(opts)
             --    但如果调用方是「数据已经在手、只想要后台刷新」，也允许跳过首绘。
             if not opts.skip_show then self:showBookList(cached_shelf) end
             -- 后台异步刷新
-            if self:checkNetwork() then
+            if self:checkNetwork() and not State.shelf_auto_refreshing then
                 -- silent：不弹 loading，数据回来只原地更新（见 showBookList）。
                 if not silent then shelf_busy(self, _("正在刷新书架...")) end
                 local plugin = self
                 if ok_Async and Async then
+                    State.shelf_request_generation = (State.shelf_request_generation or 0) + 1
+                    local generation = State.shelf_request_generation
+                    State.shelf_auto_refreshing = true
+                    local function finish()
+                        if generation == State.shelf_request_generation then
+                            State.shelf_auto_refreshing = false
+                        end
+                    end
                     Async.run(function()
                         return plugin:get_shelf()
                     end, function(ok, result, err)
+                        finish()
                         shelf_busy_done(plugin)
+                        if generation ~= State.shelf_request_generation then return end
                         if ok and type(result) == "table" and #result > 0 then
                             save_shelf_cache(plugin.settings, result)
                             -- 🔴 刷新回调必须带 refresh=true：网络回来时用户可能
@@ -295,7 +305,7 @@ function Bookshelf:showBookshelf(opts)
                         tag = "shelf",
                         -- 取消（退出 KOReader）后 on_done 不再执行，
                         -- busy 对话框必须在这里关掉，否则墨水屏上永久卡在 loading。
-                        on_cancel = function() shelf_busy_done(plugin) end,
+                        on_cancel = function() finish() shelf_busy_done(plugin) end,
                     })
                 end
             end
@@ -327,12 +337,17 @@ function Bookshelf:showBookshelf(opts)
         shelf_busy(self, force_refresh and _("正在刷新书架...") or _("正在获取书架..."))
     end
     local plugin = self
+    -- 手动/首次请求取代尚未返回的自动请求；旧回调不能覆盖新结果。
+    State.shelf_request_generation = (State.shelf_request_generation or 0) + 1
+    local generation = State.shelf_request_generation
+    State.shelf_auto_refreshing = false
     if ok_Async and Async then
         Async.run(function()
             -- force_refresh=true 跳过 client 内存缓存，从网络获取
             return plugin:get_shelf(force_refresh)
         end, function(ok, result, err)
             shelf_busy_done(plugin)
+            if generation ~= State.shelf_request_generation then return end
             if not ok or type(result) ~= "table" then
                 Log.error("fetch shelf failed:", log_error(err or result))
                 -- 获取失败：回退到旧缓存，不删除任何数据
