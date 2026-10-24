@@ -882,7 +882,7 @@ end
 ---    `_probe_rank_subcat`：1141 主分类 8372B vs 511/516/1079 二级全空表），
 ---    所以树只做在分类浏览这边，二级分类走书库接口。
 --- 折叠状态按性别记在 plugin 上：选择器关掉再开还留着，男/女频两棵树互不干扰。
----@param on_pick function(category|nil) 选中回调（nil = 「全部」）
+---@param on_pick function(category|nil) 选中回调（nil = 「全部」；主分类与「全部」走它）
 ---@param reshow function() 切换折叠后**重开本选择器**的回调。选择器是静态列表
 ---   没有原地重绘；「关掉重开」是现有选择器交互里最稳的路（换性别/换分类也这么走），
 ---   且 show_chooser 开头自带 close_chooser 防叠加。
