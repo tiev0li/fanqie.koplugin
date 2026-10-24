@@ -66,6 +66,12 @@ local function make_face(path, size)
         hb_features = { "+kern", "+liga" },
         fallbacks = {},
     }
+    -- KOReader 的 _completeFaceProperties 会给回退 face 补这一项（xtext 侧读取）；
+    -- 手建 face 也要补，否则仿粗路径缺少强度值。
+    if type(ftsize.getEmboldenHalfStrength) == "function" then
+        local ok_emb, half = pcall(ftsize.getEmboldenHalfStrength, ftsize, 0.18)
+        if ok_emb then face.embolden_half_strength = half end
+    end
     face.getFallbackFont = function(num)
         if not num or num == 0 then return face end
         return face.fallbacks[num] or false
