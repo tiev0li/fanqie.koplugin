@@ -228,6 +228,36 @@ function Bookshelf:findCachedBook(book_id)
     return nil
 end
 
+--- 供阅读统计（fanqie.stats）按书号取书名/作者：内存缓存 → 文件缓存。
+--- 与 findCachedBook 同源，但返回**精简的元数据**且不依赖 self.settings，
+--- 因为统计模块只在 resolve 时拿到 settings，没有 Bookshelf 实例。
+---@param book_id string|number
+---@param settings table
+---@return table|nil { book_id, title, author }
+function Bookshelf.find_book_meta(book_id, settings)
+    if not book_id then return nil end
+    local want = tostring(book_id)
+    local function pick(books)
+        if type(books) ~= "table" then return nil end
+        for _i, b in ipairs(books) do
+            if type(b) == "table" and tostring(b.book_id) == want then
+                return {
+                    book_id = want,
+                    title = b.title or b.book_name or b.name or "",
+                    author = b.author or b.author_name or "",
+                }
+            end
+        end
+        return nil
+    end
+    local found = pick(SHELF_MEM_CACHE)
+    if found then return found end
+    if not settings then return nil end
+    local ok, books = pcall(load_shelf_cache, settings)
+    if not ok then return nil end
+    return pick(books)
+end
+
 function Bookshelf:showBookshelf(opts)
     opts = opts or {}
     local force_refresh = opts.force_refresh == true
