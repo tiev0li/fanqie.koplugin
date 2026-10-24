@@ -1668,6 +1668,8 @@ GPL-3.0-only（v2.16.22 起由 MIT 变更，详见 LICENSE）
 | `fanqie/shelf_view.lua` / `store_view.lua` | 书架 / 书城**渲染层**：只渲染，不发请求 |
 | `fanqie/cover_cell.lua` / `ui_style.lua` | 封面网格布局与 UI 设计令牌（尺寸/配色/圆角） |
 | `fanqie/comment_view.lua` | 段评视图：可滚动、图片内嵌、回复展开 |
+| `fanqie/emoticon.lua` / `emoji_font.lua` | 段评表情码 → emoji 解码；给评论字体追加 NotoEmoji 回退 |
+| `fanqie/stats.lua` / `book_meta.lua` | 阅读统计按书合并（跨章虚拟页号）；从详情页抓作者回填统计库 |
 | `fanqie/reading/` | 官方 App reading 协议（设备身份/ARGUS/Ladon 签名/AES 解密），移植自阅读 App 书源，尽量保持原样便于对照上游 |
 | `fanqie/appsource.lua` / `appcrypto.lua` | 内置番茄APP源（回退书源 + 搜索/发现入口 + 设备池） |
 | `fanqie/state.lua` | 运行时状态（当前书籍/章节/进度的单一事实源） |
