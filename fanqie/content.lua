@@ -807,7 +807,7 @@ function Content.clean_chapter_content(raw_content, title, opts)
 
     local content = raw_content
 
-    -- 移除不可见字符（零宽空格、BOM、软连字符、双向控制符等，晴天/大灰狼广告中大量掺杂）
+    -- 移除不可见字符（零宽空格、BOM、软连字符、双向控制符等，正文里偶有掺杂）
     -- U+200B-200F, U+2028-202E, U+FEFF, U+00AD
     content = content:gsub("\226\128[\139\140\141\142\143]", "")  -- U+200B-200F 零宽空格/方向标记
     content = content:gsub("\226\128[\168\169\170\171\172\173\174]", "")  -- U+2028-202E 行/段分隔符与双向控制符
@@ -824,18 +824,6 @@ function Content.clean_chapter_content(raw_content, title, opts)
     local body_match = content:match("<body[^>]->([%s%S]-)</body>")
     if body_match then
         content = body_match
-    end
-
-    -- 移除末尾广告：晴天广告以 📣 开头，大灰狼以 "本书源" 开头
-    -- 广告可能跨多行，从起始标志到内容结尾全部删除
-    -- 📣 = U+1F4E3 = F0 9F 93 A3
-    local ad_start = nil
-    local qt_ad = content:find("\240\159\147\163", 1, true)  -- 📣
-    local dl_ad = content:find("本书源", 1, true)
-    if qt_ad then ad_start = qt_ad end
-    if dl_ad and (not ad_start or dl_ad < ad_start) then ad_start = dl_ad end
-    if ad_start then
-        content = content:sub(1, ad_start - 1)
     end
 
     -- ========================================================================

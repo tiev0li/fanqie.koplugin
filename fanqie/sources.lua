@@ -1,28 +1,18 @@
 -- FanQie Plugin Source Manager
 -- Central registry + rate limiter + active-source resolution for book sources.
--- Replaces the hardcoded "qingtian -> official" fallback with a generic
--- scheduler that iterates user-configured sources in priority order.
+-- 现在只剩两个内置源：官方 App 协议（official）与内置番茄 APP 源（fanqie_app），
+-- 均无需用户配置；调度器仍按 order / enabled / 限流统一处理。
 --
 -- Usage:
 --   local SM = require("fanqie.sources")
 --   local active = SM.get_active_sources(settings)
 --   for _, src in ipairs(active) do ... end
 
-local H = require("fanqie.helper")
-
 local SourceManager = {}
 
 -- Static registry: source_id -> metadata (no user config here).
 -- Used for menu display, configuration checks and fetcher dispatch.
 SourceManager.REGISTRY = {
-    qingtian = {
-        name = "晴天聚合",
-        configurable = true,        -- has editable server/account fields
-    },
-    dahuilang = {
-        name = "大灰狼",
-        configurable = true,       -- has editable server URL + token
-    },
     official = {
         name = "官方API（解码）",
         configurable = false,
@@ -36,11 +26,6 @@ SourceManager.REGISTRY = {
 -- Module-level rate-limit state: source_id -> array of timestamps.
 -- Module-level so it persists across Client instances (matches legacy behavior).
 local RATE_LIMIT_TIMESTAMPS = {}
-
-local function trim(s)
-    if s == nil then return "" end
-    return H.trim(tostring(s))
-end
 
 -- Check (and record) one request against the rate limit for a source.
 -- Returns (ok:bool, wait_seconds:number, recorded_ts:number|nil).
@@ -124,18 +109,7 @@ end
 -- Check whether a source is configured (skipped if not).
 function SourceManager.is_configured(source_id, cfg, settings)
     cfg = cfg or {}
-    if source_id == "qingtian" then
-        local server = trim(cfg.server_url)
-        local token  = trim(cfg.token)
-        local user   = trim(cfg.username)
-        return server ~= "" and (token ~= "" or user ~= "")
-    elseif source_id == "dahuilang" then
-        local server = trim(cfg.server_url)
-        local token  = trim(cfg.token)
-        local user   = trim(cfg.username)
-        local key    = trim(cfg.key)
-        return server ~= "" and (token ~= "" or key ~= "" or user ~= "")
-    elseif source_id == "official" then
+    if source_id == "official" then
         -- Official chapter_content_url is public; always available as fallback.
         return true
     elseif source_id == "fanqie_app" then

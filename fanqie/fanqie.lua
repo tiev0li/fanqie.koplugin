@@ -21,7 +21,6 @@ FanQie.APP_UA = "com.dragon.read/6.5.3.32 (Linux; U; Android 13; zh_CN; VDE-AL10
 -- 与 book.koplugin 的 FanQie.mobileCover / kindle-forge 的
 -- src/utils/fanqieCover.js 保持一致。
 FanQie.MOBILE_COVER_CDN = "https://p6-novel.byteimg.com"
-FanQie.QINGTIAN_DEFAULT_URL = "https://v1.gyks.cf/"
 
 function FanQie.normalize_base(base)
     local b = H.trim(base)

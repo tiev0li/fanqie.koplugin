@@ -61,7 +61,12 @@ adb push fanqie.koplugin /sdcard/koreader/plugins/
 
 数据安全说明：书架缓存、章节缓存、Cookie、**设备池**（`app_device_pool.txt`）、书源配置都存放在 **KOReader 数据目录**（与 `settings.reader.lua` 同级），不在插件目录内，覆盖升级不会丢失。
 
-首次以 v2.3.0 启动时会自动执行 settings v3 迁移：向已有的书源配置写入 `fanqie_app = { enabled=true, order=0 }`，不覆盖晴天/大灰狼的账号信息；全新安装则直接落盘默认书源配置。**无需任何手动操作。**
+首次启动会自动执行设置迁移，**无需任何手动操作**：
+
+- v3：向已有的书源配置补入 `fanqie_app = { enabled=true, order=0 }`；
+- v4：清除已移除书源（晴天聚合 / 大灰狼）的残留配置，包括其中保存的账号、密码与 token。
+
+全新安装则直接落盘默认书源配置（官方 App 协议 + 内置番茄 APP 源）。
 
 ## 5. 部署后验证
 
