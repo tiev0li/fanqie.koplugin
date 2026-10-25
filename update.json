@@ -1,16 +1,16 @@
 {
-  "version": "2.17.0",
-  "name": "番茄小说 2.17.0",
+  "version": "2.17.1",
+  "name": "番茄小说 2.17.1",
   "channel": "stable",
   "package_type": "full",
-  "package_url": "https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.0/fanqie.koplugin.zip",
+  "package_url": "https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.1/fanqie.koplugin.zip",
   "package_urls": [
-    "https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.0/fanqie.koplugin.zip",
-    "https://ghfast.top/https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.0/fanqie.koplugin.zip",
-    "https://gh-proxy.com/https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.0/fanqie.koplugin.zip",
-    "https://ghproxy.net/https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.0/fanqie.koplugin.zip"
+    "https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.1/fanqie.koplugin.zip",
+    "https://ghfast.top/https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.1/fanqie.koplugin.zip",
+    "https://gh-proxy.com/https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.1/fanqie.koplugin.zip",
+    "https://ghproxy.net/https://github.com/tiev0li/fanqie.koplugin/releases/download/v2.17.1/fanqie.koplugin.zip"
   ],
   "size": 1144362,
   "sha256": "aa4006fccb9cbbf8bef25e6912ff1085f0e5f3e6bfc3406769728ef711d66580",
-  "notes": "- **移除大灰狼 / 晴天聚合书源**：登录/取文/段评实现、注册项、设置与测速对话框全部删除，\n  只剩「官方 App 协议」与「内置番茄 APP 源」；老设置里的残留配置启动时自动清除。\n- **书城导航胶囊化**：书库的排序/状态、原创榜的频道/主分类改为常显胶囊行，点一下原地切换，\n  放不下的收进行尾「更多 ▾」（里面仍是树状选择器）。\n- **榜单名次徽章**：榜单列表与封面网格画「#N」，前三名反色；名次跨页累计。\n- **翻页更少等待**：书库一批 18→30 本、预取提前量 1→2 屏。\n- **网格列数自适应**：「显示方式」新增按屏宽自动算列数的档位。\n- **与 miuread 等书壳插件共存**：切章前声明切换目标，避免对方看门狗抢跑导致「跳下一章失败」。\n- **段评内嵌图补 alpha**：透明通道不再渲染成黑边。\n- **修复搜索必崩**（`put_status` 前向引用成全局 nil）。\n- **修复原创榜换性别报错**：分类为空时自动补该性别第一个主分类。\n- **修复网格名次徽章压住状态徽章**：相交时名次徽章挪到封面左下角。\n- 另含此前移植的阅读统计按书合并、段评表情、device_id 精度、封面书号命名、Async 收口。"
+  "notes": "合入上游 v2.16.32 / v2.16.33 的兼容部分（保留本分支的书库分类浏览与原创榜）。\\n- **段评点赞改爱心**：楼层底部与回复行统一「♥N」，统计行去掉「回复N」。\\n- **评论者标签对齐 App**：is_vip_title 头衔按图标语义跳过，新增「官方」「小编」徽标。\\n- **段评标题**：改为「N 条回复」+ 页码后缀。\\n- **书城男频/女频胶囊移到筛选行最左**，tab 只留导航。\\n- **树状分类选择器重开定位回刚操作的分组**（锚点定位），选中分类后自动清锚点。\\n- **榜单入口两级分组**：网页榜单/原创榜/男频榜单/出版榜单/礼物榜，进组再选榜。\\n- **App 榜单顺序对齐 App 排行榜页**。\\n- 未采用上游 v2.16.33 的书城收敛（删除分类浏览/原创榜整链）。"
 }

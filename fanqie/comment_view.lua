@@ -33,7 +33,7 @@ data 结构（main.lua 组装，见 _renderParaReviewView）：
   comments = {
     {
       head  = "1. 名字",                       -- 头行（加粗；v2.16.11 只留序号+用户名）
-      foot  = "赞 3 · 回复 5   2026-10-17 12:00", -- 统计行（灰字小号，正文下方；**纯信息**）
+      foot  = "♥3   2026-10-17 12:00", -- 统计行（灰字小号，正文下方；**纯信息**）
       fold  = "展开 5 条回复",                   -- 折叠标记（正文色、单独一行、可点；「收起回复」反之）
       text  = "正文……",
       images = { { path = "/…/c_xx_1.webp", w = 240, h = 240,    -- 已下载
@@ -41,7 +41,7 @@ data 结构（main.lua 组装，见 _renderParaReviewView）：
                  { note = "（图2：正在后台加载…）",               -- 占位（也可点）
                    img_no = 2, tap = { no = 1, img = 2 } },
                  { note = "（HEIC 图片，本设备无法显示）" } },     -- 不可点（无 tap）
-      replies = { { head = "↳ 名字 · 赞 1", text = "……", images = {} }, … },
+      replies = { { head = "↳ 名字 · ♥1", text = "……", images = {} }, … },
       more_replies = 5,                          -- 还有 N 条回复未加载
       tap      = { no = 1, collapse = false },   -- 点「头行+正文」回传；nil = 不可点
       more_tap = { no = 1, more = true },        -- 点「还有 N 条回复」回传
@@ -333,7 +333,8 @@ function CommentView:_append_block(group, block, content_w, indent)
         end
     end
 
-    -- 统计行（v2.16.11 引入，v2.16.14 只留纯信息）：「赞N · 回复N  时间」
+    -- 统计行（v2.16.11 引入，v2.16.14 只留纯信息）：「♥N  时间」（v2.16.32 起点赞改爱心、
+    -- 回复数移出统计行 —— 数字由折叠行「展开 N 条回复」单独承载）。
     -- 灰字小号，跟在正文/图片之后 —— 用户报头行太挤（日期/赞/回复数全塞第一行）。
     if type(block.foot) == "string" and block.foot ~= "" then
         local foot = TextBoxWidget:new{
