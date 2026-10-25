@@ -405,6 +405,26 @@ function AppSource.get_chapter_list(book_id)
     return chapters, data.book_info
 end
 
+-- 把 APP 接口的「作品」字段归一成详情框认的键。
+-- 🔴 `creation_status` 语义与网页侧一致（0=完结 / 1=连载，实测 2026-10-20：
+--    榜单 cell 接口、搜索接口都带这个字段），直接透传到 book.creation_status，
+--    详情框才能判出「连载中 / 已完结」—— 以前不透传，详情一律显示「未知」，
+--    与列表行自相矛盾。
+-- `last_publish_time` 是 unix 秒，作为「最后更新时间」参与「疑似断更」判断。
+local function put_status(b, it)
+    b.creation_status = tonumber(it.creation_status)
+    b.last_chapter_update_time = tonumber(it.last_publish_time)
+    -- 章节数：榜单接口给 word_number（字数）而不是章数，不伪造；
+    -- 目录接口返回的 book_info 里才有真实章数（见 get_book_info）。
+    return b
+end
+
+-- 🔴 上面这个 helper 必须定义在所有调用点**之前**。Lua 的 local 作用域从声明语句
+--    之后才开始，写在使用处之后会解析成**全局 nil** —— 曾经就是这样：搜索/详情/榜单
+--    一律崩在 `attempt to call global 'put_status' (a nil value)`
+--    （2026-10-21 waydroid 回归记过一次，v2.17.0 真机回归又复现了一次）。
+--    新增调用点请确认它在这段声明之下。
+
 -- Returns normalized book info:
 --   { name, author, kind, intro, coverUrl, book_id, creation_status,
 --     last_chapter_update_time, serial_count }
@@ -556,20 +576,6 @@ end
 -- ===========================================================================
 -- Explore  (exploreUrl + ruleExplore: rank / tab / home)
 -- ===========================================================================
-
--- 把 APP 接口的「作品」字段归一成详情框认的键。
--- 🔴 `creation_status` 语义与网页侧一致（0=完结 / 1=连载，实测 2026-10-20：
---    榜单 cell 接口、搜索接口都带这个字段），直接透传到 book.creation_status，
---    详情框才能判出「连载中 / 已完结」—— 以前不透传，详情一律显示「未知」，
---    与列表行自相矛盾。
--- `last_publish_time` 是 unix 秒，作为「最后更新时间」参与「疑似断更」判断。
-local function put_status(b, it)
-    b.creation_status = tonumber(it.creation_status)
-    b.last_chapter_update_time = tonumber(it.last_publish_time)
-    -- 章节数：榜单接口给 word_number（字数）而不是章数，不伪造；
-    -- 目录接口返回的 book_info 里才有真实章数（见 get_book_info）。
-    return b
-end
 
 local function norm_book(it, id_key)
     local bid = tostring(it[id_key or 'book_id'] or it.bookId or "")
