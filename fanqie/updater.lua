@@ -35,8 +35,11 @@ Updater.__index = Updater
 
 --- 更新清单地址。仓库是 public，走 raw.githubusercontent（国内直连基本不通，
 --- 下面 GITHUB_MIRRORS 会自动为它生成镜像地址）。
+--- ⚠️ 这里必须指向**本插件的发版仓库**。v2.17.0 起从上游 hesan1232/fanqie.koplugin
+---    fork 出来单独维护（移除了聚合书源、并入社区 PR），更新源若不跟着改，
+---    用户「检查更新」拿到的会是上游的清单与安装包，等于把本地改动全部回退。
 local MANIFEST_URLS = {
-    "https://raw.githubusercontent.com/hesan1232/fanqie.koplugin/main/update.json",
+    "https://raw.githubusercontent.com/tiev0li/fanqie.koplugin/main/update.json",
 }
 
 --- GitHub 加速镜像。用法是「前缀 + 原始完整 URL」。
