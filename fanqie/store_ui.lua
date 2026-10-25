@@ -1159,6 +1159,24 @@ local function rank_category_tabs(plugin, menu)
     }
 end
 
+--- 原创榜主分类的**兜底**：接口必须带 category_id，而「全部」/换性别都会把它清空。
+--- 取该性别分类树里的第一个主分类（`list` 可选，缺省读 plugin 上的缓存）。
+--- 树没预热好时返回 nil（调用方等 `ensure_categories` 的回调再来一次，
+--- 见 apply_rank_category）。
+local function first_main_category(plugin, gender, list)
+    list = list or ((type(plugin._store_categories) == "table"
+        and plugin._store_categories_gender == gender) and plugin._store_categories)
+    if type(list) ~= "table" then return nil end
+    local groups = Store.group_categories(list)
+    for _i, g in ipairs(groups) do
+        if g.label == "主分类" then
+            local items = g.items or {}
+            if items[1] then return items[1] end
+        end
+    end
+    return list[1]
+end
+
 --- 在**已有菜单**上原地应用一个原创榜状态（tab 换榜别 / 筛选行换性别·分类共用）。
 local function apply_rank_category(plugin, menu, gender, mold, category)
     local st = menu._store_state
@@ -1181,6 +1199,28 @@ local function apply_rank_category(plugin, menu, gender, mold, category)
     refresh_menu_actions(plugin, menu)
     -- 换性别后分类树可能是另一棵（男/女频各一棵）：预热 + 就绪后重绘胶囊行
     warm_categories(plugin, gender, menu)
+    -- 🔴「全部」在原创榜上**不是**一个可查的状态：/api/rank/category/list 必须带
+    --    category_id（store.lua 的 rank_category 直接判 arg 错误回「原创榜需要先选一个
+    --    分类」）。胶囊行的「全部」/换性别都传 nil ⇒ 不先补一个分类就会当场报错。
+    --    所以这里发现 category 为空时，取该性别分类树里的**第一个主分类**补上；
+    --    树还没预热好就等它（ensure_categories 自带缓存与回调）。
+    if not st.category_id then
+        ensure_categories(plugin, gender, function(list)
+            if not menu or menu._miu_closed then return end
+            local cur = menu._store_state
+            -- 等树期间用户可能又换了榜/性别/分类：只在「仍是本次请求的空分类」时补
+            if cur ~= st or st.gender ~= gender or st.category_id then return end
+            local first = first_main_category(plugin, gender, list)
+            if not first then
+                -- 连分类都没有：别再发必然失败的请求，直接说明情况
+                st.loading = false
+                plugin:showError(_("原创榜暂时没有可选分类"))
+                return
+            end
+            apply_rank_category(plugin, menu, gender, mold, first)
+        end)
+        return
+    end
     reload_from_head(plugin, menu)
 end
 
@@ -1260,6 +1300,9 @@ local function rank_category_chips(plugin, menu)
             active = st.category_id == nil or st.category_id == "",
             on_tap = function()
                 if st.category_id == nil or st.category_id == "" then return end
+                -- ⚠️ 原创榜接口**没有**「全部分类」：category=nil 会直接报
+                --    「原创榜需要先选一个分类」。这个胶囊的语义变成了「回到默认
+                --    （第一个主分类）」，由 apply_rank_category 的兜底补上。
                 apply_rank_category(plugin, menu, st.gender, st.rank_mold, nil)
             end,
         }

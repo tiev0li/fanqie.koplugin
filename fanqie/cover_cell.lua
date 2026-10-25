@@ -61,7 +61,7 @@ local CoverCell = {}
 -- 🔴 构建标记：随每次改动本文件手动更新。「关于」里会显示它 —— 用户报告
 -- 「改了没生效」时，先看这个标记对不对：标记是旧的 ⇒ 设备上这份文件**没换上**，
 -- 是解压/覆盖环节的问题，别去改代码。
-CoverCell.BUILD = "20261025a"
+CoverCell.BUILD = "20261025b"
 
 -- 封面宽高比 2:3（与番茄封面一致，也与 book.koplugin 的 `cw * 3 / 2` 同口径）
 local COVER_RATIO = 1.5
@@ -400,6 +400,10 @@ function CoverCellWidget:init()
     -- （徽章只露出半截，进度条也贴边）。叠到封面上以后它不再参与纵向排版，
     -- 书名 / 章节 / 进度条按原有预留量就能完整放下（书架另补 `progressExtra()`）。
     local cover_stack = clipped_cover
+    -- 右上角状态徽章占掉的实际矩形（w/h 为 nil = 没画）。名次徽章要靠它避让：
+    -- 「已完结（停止更新）」这类长标签几乎占满整个封面宽度，名次徽章再贴左上角
+    -- 就压在一起了（实测 4×4 网格里几乎每个格子都相撞）。见下面名次徽章的放置。
+    local tag_box
     if type(entry.tag) == "string" and entry.tag ~= "" then
         local badge = S.badge(entry.tag, 12)
         local bs = badge:getSize()
@@ -411,6 +415,7 @@ function CoverCellWidget:init()
         local by = inset
         if by + bs.h > m.ch then by = math.max(0, m.ch - bs.h) end
         badge.overlap_offset = { bx, by }
+        tag_box = { x = bx, y = by, w = bs.w, h = bs.h }
         -- `allow_mirroring = false`：镜像版式下 OverlapGroup 会翻转 x，徽章会跑到左上角
         cover_stack = OverlapGroup:new{
             dimen = Geom:new{ w = m.cw, h = m.ch },
@@ -428,10 +433,18 @@ function CoverCellWidget:init()
         end
     end
 
-    -- 名次徽章（v2.16.29）：榜单网格的「第 N 名」，叠在封面**左上角**（状态徽章
-    -- 在右上，互不打架）。前三名用反色底（黑底白字）—— 榜单就该一眼看出头部；
-    -- 其余名次用普通描边徽章。字段口径与列表行的「#N」一致（entry.rank，见
-    -- store_view.build_items / store_ui 的榜单名次编号）。
+    -- 名次徽章（v2.16.29）：榜单网格的「第 N 名」，叠在封面**左上角**。前三名用
+    -- 反色底（黑底白字）—— 榜单就该一眼看出头部；其余名次用普通描边徽章。
+    -- 字段口径与列表行的「#N」一致（entry.rank，见 store_view.build_items /
+    -- store_ui 的榜单名次编号）。
+    --
+    -- 🔴 必须避让右上角的状态徽章：「已完结（停止更新）」这种长标签在 4 列网格里
+    --    几乎占满整个封面宽度，名次徽章贴左上角就会压在上面（实测 16 个格子有 13 个
+    --    相撞，名次数字把「连载中」切掉一半）。规则：
+    --      * 右上角没有状态徽章 → 左上角（原样）；
+    --      * 有，且两者同一行会重叠 → 挪到**封面左下角**（名次是次要信息，
+    --        宁可挪位置也不遮住状态）；
+    --      * 有，但不重叠（短标签 / 宽格子）→ 仍在左上角。
     if type(entry.rank) == "string" and entry.rank ~= "" then
         local no = tonumber(entry.rank)
         local badge
@@ -446,6 +459,13 @@ function CoverCellWidget:init()
         local by = inset
         if ok_s and type(bs) == "table" and tonumber(bs.h) then
             if by + bs.h > m.ch then by = math.max(0, m.ch - bs.h) end
+            local overlaps = tag_box
+                and bx < tag_box.x + tag_box.w + inset
+                and by < tag_box.y + tag_box.h + inset
+            if overlaps then
+                -- 挪到左下角（同一列空间里最高优先级是右上角的真实状态）
+                by = math.max(inset, m.ch - bs.h - inset)
+            end
         end
         badge.overlap_offset = { bx, by }
         if cover_stack ~= clipped_cover then
