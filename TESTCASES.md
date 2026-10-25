@@ -245,13 +245,13 @@
 
 - **「官方」「小编」徽标**：本轮翻到的评论里没有带 `is_official_cert` / `is_cp` 的条目，
   皮肤路径已在 PC 侧用 7 组 `Comments.titles_of` 用例验证，真机留待命中时复验。
-- **段评气泡必须走「官方 API」源才注入**：`fanqie/client.lua:222` 的 `fanqie_app`
-  fetcher 是 `function(bid, iid, opts) return obj:fanqie_app_get_content(bid, iid) end`
-  —— **opts 没有透传**，而内置 APP 源 order=0 排在官方之前，于是 review=true 被丢掉，
-  正文不带 `<comment>` 气泡。实测：默认配置下 `raw_comment_count=0`；把 `sources.fanqie_app.enabled`
-  关掉（只留 official）后同一章 `para_reviews_from_api=198`、正文注入 199 个气泡，
-  段评标题/♥/标签才对得上。**这是 e13ed96 起就有的既存缺陷，不是本次合入引入**，
-  本轮未改代码，只记录复现方式。测试后设置文件已还原（`fanqie_app` 重新启用）。
+- **段评气泡缺源的缺陷已修复（真机复验通过）**：原来 `client.lua` 的 `fanqie_app`
+  fetcher 不透传 opts，而内置 APP 源 order=0 排在官方之前 ⇒ `review=true` 被丢掉，
+  正文不带气泡。现在 `get_chapter_content_with_fallback` 在 `opts.review` 时把
+  **official 提到本轮调度第一位**（不改用户设置里的 order，段评关掉后优先级照旧）。
+  复验：默认配置（内置源仍启用、order=0）+ 段评开，打开《觉醒D级天赋，被天才校花倒追》
+  第 1 章 → 日志 `源成功: source=official`、`段评统计注入: paras=26 bubbles=26`、
+  `raw_comment_count=26`，缓存章节里 27 个 `para-comment` 气泡、`para_reviews_*.lua` 落盘。
 - **测试期间改过的设备状态已恢复**：`settings/fanqie.lua` 三度改写（开段评 / 关内置源 /
   还原）后已与测试前逐键一致（sha 变化仅来自 KOReader 自身回写）；
   `师尊：这个冲师逆徒才不是圣子` 与 `实教，一之濑的守护骑士` 的章节缓存被清空过，

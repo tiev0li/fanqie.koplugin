@@ -1044,6 +1044,22 @@ function Client:get_chapter_content_with_fallback(book_id, item_id, opts)
         sources = { { id = "official", config = { rate_limit = { max_requests = 0, window_seconds = 0 } } } }
     end
 
+    -- 🔴 段评模式（review=true）必须**先走官方 App 协议**：
+    --    只有 official_get_content 会拉 commentapi 统计并把 <comment> 注入正文；
+    --    内置 fanqie_app 源（默认 order=0，排在 official 之前）只给纯正文，
+    --    opts 也传不进去 —— 它一旦先成功，段评气泡就整章消失
+    --    （实测：默认配置 raw_comment_count=0；把它挪到最后后同章注入 199 个气泡）。
+    --    这里只调**本轮顺序**，不改用户设置里的 order：段评关掉后仍按原优先级调度。
+    if opts.review then
+        local ordered = {}
+        for _, src in ipairs(sources) do
+            if src.id == "official" then table.insert(ordered, 1, src) else
+                ordered[#ordered + 1] = src
+            end
+        end
+        sources = ordered
+    end
+
     -- 本轮放行请求记录的时间戳，供子进程→父进程合并限流状态。
     -- 子进程 fork 出 RATE_LIMIT_TIMESTAMPS 副本，记录的时间戳会随子进程退出丢失，
     -- 需经此返回值带回父进程由 SourceManager.merge_rate_limit_timestamps 合并。
