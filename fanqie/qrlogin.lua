@@ -68,7 +68,12 @@ local FANQIE_LOGIN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
     .. "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"
 
 local POLL_INTERVAL = 2     -- 轮询间隔（秒）
-local QR_TIMEOUT = 300      -- 二维码整体超时（秒），对应 qrlogin.py 的 expire
+local QR_TIMEOUT = 300      -- 兜底总时长（秒）：网络一直失败时不要无限轮询
+-- 服务端 get_qrcode 只给 **60 秒**有效期（实测 expire_time - now ≈ 60）。
+-- 扫码 + 在手机上确认通常要十几到几十秒，所以必须自动换码，不能到点就弹「已过期」。
+local MAX_AUTO_REFRESH = 5  -- 最多自动换码几次（≈ 5 分钟），超过才让用户手动决定
+-- 本地时钟与服务端可能有偏差（实测设备与服务器差数秒）。本地时间只作**提示**，
+-- 是否真的过期以服务端 check_qrconnect 的 status 为准，避免「手机已确认、插件先判过期」。
 
 local COMMON_PARAMS = {
     passport_jssdk_version = "3.0.16",
@@ -220,10 +225,16 @@ end
 --- 获取二维码并显示
 function QRLogin:_begin()
     self:cancel()  -- 清理旧状态并 generation+1
-    local gen = self.generation
+    self.refresh_count = 0
+    Log.info("[FanQieQR] 开始获取二维码")
+    self:_fetch_and_show(self.generation)
+end
+
+--- 取一张二维码并显示（首次获取与自动换码共用）。
+-- 调用方负责 generation 的一致性：首次登录用新 generation，自动换码沿用原 generation。
+function QRLogin:_fetch_and_show(gen)
     self.started = os.time()
     self.plugin:showBusy(_("获取二维码中..."))
-    Log.info("[FanQieQR] 开始获取二维码")
 
     Async.run(function()
         -- 步骤1: 访问登录页预热 cookie（passport_csrf_token 等）
@@ -270,43 +281,62 @@ function QRLogin:_begin()
         end
         self.jar = rebuild_jar(result)
 
-        -- 显示二维码（KOReader 内置 QRMessage 把 URL 生成二维码图片）
-        local size = math.floor(math.min(Device.screen:getWidth(), Device.screen:getHeight()) * 0.72)
-        local dialog
-        dialog = QRMessage:new{
-            text = result.qr_url,
-            width = size,
-            height = size,
-            scale_factor = 0.9,
-            dismiss_callback = function()
-                Log.debug("[FanQieQR] dismiss_callback: gen=" .. tostring(gen) .. " generation=" .. tostring(self.generation) .. " dialog_match=" .. tostring(self.dialog == dialog) .. " login_completed=" .. tostring(self.login_completed))
-                if self.dialog == dialog then self.dialog = nil end
-                -- 登录已完成时不再触发 cancel（_finish_login_success 关对话框会同步触发此回调，
-                -- 仅靠 generation 判断不可靠——UIManager:close 的 dismiss_callback 时机早于
-                -- generation+1 生效，会导致 jar 被清空）
-                if gen == self.generation and not self.login_completed then
-                    self:cancel()
-                    self:toast(_("已取消登录"))
-                end
-            end,
-        }
-        self.dialog = dialog
-        UIManager:show(dialog)
-        Log.info("[FanQieQR] 二维码已显示，开始轮询 token=", tostring(result.token):sub(1, 12))
-        self:_schedule(gen, result.token, result.csrf, result.expire_time)
+        self:_show_qr(gen, result)
     end, { timeout = 20 })
 end
 
+--- 显示一张二维码并开始轮询（首次获取与自动换码共用）。
+-- @param result table { token, qr_url, csrf, expire_time }
+function QRLogin:_show_qr(gen, result)
+    if gen ~= self.generation then return end
+    self.csrf_current = result.csrf
+    self.started = os.time()
+
+    -- 自动换码时旧对话框可能还在；先收掉再显示新的
+    self:_close_dialog()
+
+    local size = math.floor(math.min(Device.screen:getWidth(), Device.screen:getHeight()) * 0.72)
+    local dialog
+    dialog = QRMessage:new{
+        text = result.qr_url,
+        width = size,
+        height = size,
+        scale_factor = 0.9,
+        dismiss_callback = function()
+            Log.debug("[FanQieQR] dismiss_callback: gen=" .. tostring(gen) .. " generation=" .. tostring(self.generation) .. " dialog_match=" .. tostring(self.dialog == dialog) .. " login_completed=" .. tostring(self.login_completed))
+            if self.dialog == dialog then self.dialog = nil end
+            -- 登录已完成时不再触发 cancel（_finish_login_success 关对话框会同步触发此回调，
+            -- 仅靠 generation 判断不可靠——UIManager:close 的 dismiss_callback 时机早于
+            -- generation+1 生效，会导致 jar 被清空）
+            -- 自动换码时也会 close 旧对话框：那种情况 self.dialog 已经被换成新码或置空，
+            -- `dialog_match` 为假 ⇒ 不会误判成用户取消。
+            if self.dialog == dialog and gen == self.generation and not self.login_completed then
+                self:cancel()
+                self:toast(_("已取消登录"))
+            end
+        end,
+    }
+    self.dialog = dialog
+    UIManager:show(dialog)
+    Log.info("[FanQieQR] 二维码已显示，开始轮询 token=", tostring(result.token):sub(1, 12))
+    self:_schedule(gen, result.token, result.csrf, result.expire_time)
+end
+
 --- 轮询扫码状态
+--
+-- 🔴 过期判据以**服务端**为准（status == "expired"），本地时间只是提示：
+--    旧实现每次轮询前先用 `os.time() > expire_time` 判死，而服务端只给 60 秒。
+--    用户在手机上慢慢确认时，本地先到点 ⇒ 直接弹「二维码已过期」、**不再发请求**
+--    ⇒ 服务端返回的 confirmed 永远收不到（真机症状：手机显示已登录，插件说已过期）。
+--    现在本地到点只做两件事：换一张新码（自动），或网络持续不通时才兜底提示。
 function QRLogin:_schedule(gen, token, csrf, expire_time)
     if gen ~= self.generation then return end
-    -- 超时检测
-    if os.time() - self.started > QR_TIMEOUT then
-        self:show_retry(_("二维码已过期"))
-        return
-    end
-    if expire_time and expire_time > 0 and os.time() > expire_time then
-        self:show_retry(_("二维码已过期"))
+    -- 兜底：网络持续失败时不要无限轮询。只在「一直在失败」时提示，
+    -- 正常换码链路不会走到这里（换码会重置 self.started）。
+    if self.started > 0 and os.time() - self.started > QR_TIMEOUT
+        and (self.poll_failures or 0) > 3 then
+        Log.warn("[FanQieQR] 轮询持续失败 " .. tostring(self.poll_failures) .. " 次，停止")
+        self:show_retry(_("网络不稳定，请稍后重试"))
         return
     end
 
@@ -324,8 +354,16 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
         local new_jar = Cookie.merge_set_cookie(self.jar, raw_set_cookie)
         local has_sessionid = new_jar.sessionid and new_jar.sessionid ~= ""
 
-        -- 调试日志：打印 Set-Cookie 原始值和 jar 状态（截断防刷屏）
-        Log.debug("[FanQieQR] 轮询响应 Set-Cookie(前300): " .. tostring(raw_set_cookie):sub(1, 300))
+        -- 调试日志：只记 cookie **名字**与 Set-Cookie 长度，不记值（含 sessionid 等凭证）
+        Log.debug("[FanQieQR] 轮询响应 Set-Cookie 长度=" .. #tostring(raw_set_cookie)
+            .. " 本轮新增 cookie=" .. (function()
+                local names = {}
+                for k in pairs(new_jar) do
+                    if self.jar[k] == nil then names[#names + 1] = k end
+                end
+                table.sort(names)
+                return #names > 0 and table.concat(names, ",") or "(无)"
+            end)())
         Log.debug("[FanQieQR] has_sessionid=" .. tostring(has_sessionid) .. " jar_keys=" .. (function()
             local keys = {}
             for k, _ in pairs(new_jar) do table.insert(keys, k) end
@@ -360,6 +398,14 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
         if status == "confirmed" or status == "success" then
             Log.info("[FanQieQR] 确认状态 data=" .. text:sub(1, 500))
         end
+        -- 非 new 的每个状态都记一条：扫码后拿不到会话时，先看这里判断
+        -- 是「服务端没认出这次扫码」（仍是 new）还是「认出了但没给 sessionid」。
+        if status ~= "new" then
+            Log.info("[FanQieQR] 轮询状态 status=" .. tostring(status)
+                .. " error_code=" .. tostring(d.error_code)
+                .. " has_sessionid=" .. tostring(has_sessionid)
+                .. " redirect=" .. tostring(d.redirect_url):sub(1, 80))
+        end
         return {
             status = status,
             error_code = d.error_code,
@@ -367,16 +413,32 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
             jar_str = Cookie.to_header(new_jar),
             has_sessionid = has_sessionid,
             redirect_url = d.redirect_url or "",
+            -- expired 时服务端常常**顺带下发一张新码**（实测：status=expired 且带
+            -- token/qrcode_index_url/expire_time）。直接用它换图，省掉一次请求。
+            next_token = d.token,
+            next_qr_url = d.qrcode_index_url,
+            next_expire = tonumber(d.expire_time) or 0,
         }
     end, function(ok, result, err)
-        if not ok or gen ~= self.generation then return end
+        -- ⚠️ 诊断：真机出现过「轮询只跑了一次就静默断掉」，看不出回调到底进没进来。
+        -- 这条 DEBUG 是排查该问题的最低成本抓手（只在开调试日志时写）。
+        Log.debug("[FanQieQR] 轮询回调: ok=" .. tostring(ok)
+            .. " gen=" .. tostring(gen) .. " generation=" .. tostring(self.generation)
+            .. " err=" .. tostring(err) .. " status=" .. tostring(type(result) == "table" and result.status))
+        if not ok or gen ~= self.generation then
+            Log.debug("[FanQieQR] 轮询回调丢弃: ok=" .. tostring(ok)
+                .. " gen=" .. tostring(gen) .. " generation=" .. tostring(self.generation))
+            return
+        end
         if err then
             self.poll_failures = (self.poll_failures or 0) + 1
             if self.poll_failures == 1 or self.poll_failures % 5 == 0 then
                 Log.warn("[FanQieQR] 轮询失败 #" .. self.poll_failures .. ":", err)
             end
             -- 网络错误：稍后重试，不立即判定失败
+            Log.debug("[FanQieQR] 安排重试 #" .. self.poll_failures .. "，间隔 " .. POLL_INTERVAL .. "s")
             UIManager:scheduleIn(POLL_INTERVAL, function()
+                Log.debug("[FanQieQR] 重试触发 #" .. self.poll_failures)
                 self:_schedule(gen, token, csrf, expire_time)
             end)
             return
@@ -402,7 +464,8 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
                 self:_finish_login_success(gen)
             end
         elseif status == "expired" then
-            self:show_retry(_("二维码已过期"))
+            -- 服务端明确说过期。它通常**顺带给了新码**，直接用；没给才重新请求。
+            self:_auto_refresh_qr(gen, _("二维码已过期，正在换一张…"), result)
         elseif status == "scanned" or status == "confirming" or status == "confirm" then
             Log.info("[FanQieQR] 用户已扫码/确认中 status=", status)
             UIManager:scheduleIn(POLL_INTERVAL, function()
@@ -410,12 +473,50 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
             end)
         else
             -- new / redirect / 其他非终态：继续轮询
+            -- 本地判断已过有效期、而服务端还回 new：说明这张码确实不能再扫了
+            -- （服务端偶有延迟），主动换一张，免得用户对着失效二维码白等。
+            -- ⚠️ 只在**没扫过**时换码；scanned/confirming 走上面的分支继续等确认。
+            if expire_time and expire_time > 0 and os.time() > expire_time + 3 then
+                self:_auto_refresh_qr(gen, _("二维码已过期，正在换一张…"))
+                return
+            end
             Log.debug("[FanQieQR] 轮询中 status=", status)
             UIManager:scheduleIn(POLL_INTERVAL, function()
                 self:_schedule(gen, token, csrf, expire_time)
             end)
         end
     end, { timeout = 15 })
+end
+
+--- 自动换一张新二维码，继续等用户扫。
+--
+-- 服务端有效期只有 60 秒，而「掏手机 → 扫码 → 在手机上点确认」常常超过它；
+-- 旧实现在这里弹「已过期」让用户手动重来，体验很差。现在自动换码，
+-- 窗口保持在同一次登录会话里（generation 不变），超过 MAX_AUTO_REFRESH 次
+-- 才退回手动重试，避免无人值守时无限打接口。
+function QRLogin:_auto_refresh_qr(gen, reason, fresh)
+    if gen ~= self.generation then return end
+    self.refresh_count = (self.refresh_count or 0) + 1
+    if self.refresh_count > MAX_AUTO_REFRESH then
+        Log.warn("[FanQieQR] 自动换码超过 " .. MAX_AUTO_REFRESH .. " 次，转为手动重试")
+        self:show_retry(_("二维码已过期"))
+        return
+    end
+    Log.info("[FanQieQR] 自动换码 #" .. self.refresh_count .. "：" .. tostring(reason or ""))
+    self:_close_dialog()
+    self.poll_failures = 0
+    -- 服务端在 expired 响应里直接给了新码：用它，省一次请求
+    if type(fresh) == "table" and fresh.next_token and fresh.next_qr_url then
+        Log.info("[FanQieQR] 复用服务端下发的新码 token=" .. tostring(fresh.next_token):sub(1, 12))
+        self:_show_qr(gen, {
+            token = fresh.next_token,
+            qr_url = fresh.next_qr_url,
+            csrf = self.csrf_current,
+            expire_time = fresh.next_expire or 0,
+        })
+        return
+    end
+    self:_fetch_and_show(gen)
 end
 
 --- 用户确认后访问 redirect_url 获取 sessionid（字节跳动 passport 标准流程）
@@ -511,11 +612,27 @@ function QRLogin:_finish_login_success(gen)
     end
     table.sort(keys)
     Log.info("[FanQieQR] 登录成功，扫码获取到 " .. count .. " 个 cookie: " .. table.concat(keys, ", "))
-    Log.info("[FanQieQR] cookie header: " .. Cookie.to_header(jar))
+    -- ⚠️ 不要把完整 Cookie 写进日志：sessionid 等就是登录凭证，
+    --    日志可能被分享到 issue 里。只记录长度与 cookie 名，值一律脱敏。
+    Log.info("[FanQieQR] cookie header 长度=" .. #Cookie.to_header(jar) .. "（值已脱敏，不落盘）")
     self.settings:set("cookies", jar)
     self.settings:flush()
     self.jar = jar  -- 恢复 self.jar（dismiss_callback 可能已清空）
     self:toast(_("登录成功"))
+
+    -- 登录成功后直接进书架并拉一次最新书架（用户期望：扫完码就该看到自己的书）。
+    -- 放到下一拍执行，避免在二维码对话框的关闭回调栈里又开一个新窗口。
+    if type(self.plugin.showBookshelf) == "function" then
+        UIManager:nextTick(function()
+            pcall(function()
+                -- 先失效书架缓存，确保拿到的是登录后账号的书单
+                if type(self.plugin.clearShelfCache) == "function" then
+                    self.plugin:clearShelfCache()
+                end
+                self.plugin:showBookshelf({ force_refresh = true })
+            end)
+        end)
+    end
 end
 
 --- 显示重试对话框（generation+1 使旧回调失效，等待用户选择）

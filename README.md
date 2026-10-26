@@ -569,6 +569,42 @@ A: 番茄网页接口把部分文案用私用区码位替换过，插件内置�
 
 ## 更新日志
 
+### v3.0
+
+**代码结构重构（功能与对外接口不变）**
+
+`main.lua` 从 **6973 行降到 786 行**，只保留模块装配（`safe_require`）、插件生命周期与菜单注册。
+原先混在入口里的业务方法按职责原样迁出，**116 个公开方法名与函数体逐字节保持一致**
+（唯一例外是 `getPluginPath`，改为由入口注入插件根目录——迁移后 `debug.getinfo` 会指向子目录）。
+
+- **新增动作模块**（按原函数边界机械搬迁，不改写逻辑）：
+  `fanqie/comments/`（段评数据 + 视图）、`fanqie/menus/`（主菜单/设置/缓存/书源/日志）、
+  `fanqie/shelf/`（书架列表与封面）、`fanqie/details/`（详情/搜索/发现/长按菜单）、
+  `fanqie/chapters/`（目录/跳章/切章）、`fanqie/reader/`（进度同步/翻页/关文档/返回书架）、
+  `fanqie/cache/`（缓存管理与下载管理）、`fanqie/opening/`（开书与后台刷目录）。
+- **新增 `fanqie/runtime.lua`**：跨模块共享的运行时依赖与小工具
+  （墙钟计时、错误文案、章节缓存取用、图集心跳、插件根目录），消除原先散落在入口里的多份副本。
+- **新增 `fanqie/comments/shared.lua`**：段评数据与渲染两条链路共用的分页常量与纯函数，
+  分页大小只有一份口径。
+- **挂载方式**：动作模块按白名单登记方法名（`ACTION_MODULES`），类常量也在此挂回主类，
+  避免覆盖生命周期或意外引入新接口。
+
+**重构过程中发现并修复的 4 个回归**（均为拆分导致的作用域丢失，真机回归抓出）：
+
+| 现象 | 根因 |
+|------|------|
+| 点段评气泡后报 `attempt to compare nil with number` | `PARA_REVIEW_PAGE_SIZE` 随文件迁走后渲染侧引用为空 |
+| 展开回复报 `attempt to index global 'Client'` | 新模块未 `require("fanqie.client")` |
+| 段评图片全部下载失败，路径出现 `C.comment_images` | 批量改前缀时误改了字符串字面量 |
+| 图片失败日志走未定义的 `logger` | 入口顶层 local 迁走后丢失 |
+
+顺带新增本地静态检查（`tests/`，不进发布包）：方法挂载冒烟、原实现逐字节对照、
+**未定义全局读扫描**——最后一类问题编译期不报、方法表对照也查不出，只能靠它拦。
+
+**真机回归**：AiNote X1（Android 7.1.2）覆盖书架/详情/正文/段评（含回复树、图片、翻页）/
+目录跳章/切章/书籍信息/返回书架/显示方式/排序/缓存管理/设置/书源管理/发现书籍，
+修复后日志 0 条 ERROR。详见 [TESTCASES.md](TESTCASES.md)。
+
 ### v2.17.1
 
 合入上游 v2.16.32 / v2.16.33 中与本分支兼容的部分（上游把「书库分类浏览」与
@@ -1803,7 +1839,7 @@ GPL-3.0-only（v2.16.22 起由 MIT 变更，详见 LICENSE）
 
 | 文件 | 职责 |
 |------|------|
-| `main.lua` | 插件入口：模块加载（safe_require）、菜单注册、动作编排、mixin 挂载 |
+| `main.lua` | 插件入口：模块加载（safe_require）、菜单注册、动作模块挂载 |
 | `_meta.lua` / `fanqie/info.lua` | 版本与描述（单一口径在 info.lua，_meta.lua 读取） |
 | `fanqie/settings.lua` | 设置存取、默认值、v4 迁移（`settings/fanqie.lua`） |
 | `fanqie/client.lua` | 网络客户端：所有 HTTP 的唯一出口（官方 App 协议 / 内置 APP 源） |
@@ -1825,6 +1861,8 @@ GPL-3.0-only（v2.16.22 起由 MIT 变更，详见 LICENSE）
 | `fanqie/qrlogin.lua` | 扫码登录（网页 Cookie 获取） |
 | `fanqie/updater*.lua` | 在线更新（HTTP / 安装 / UI 三段） |
 | `fanqie/helper.lua` / `cookie.lua` / `crypto.lua` / `i18n.lua` / `logger.lua` / `img_size.lua` / `digests.lua` | 公共工具与基础设施 |
+| `fanqie/runtime.lua` | 动作模块共享的运行时依赖与小工具（计时/错误文案/缓存取用/插件根目录） |
+| `fanqie/comments/` `menus/` `shelf/` `details/` `chapters/` `reader/` `cache/` `opening/` | 从 `main.lua` 按职责拆出的动作模块（方法名不变） |
 | `patches/core.lua` | 对 KOReader 本体的运行时补丁（段评点击、章首边界等） |
 
 数据文件位置（升级插件不受影响）见 [DEPLOY.md](DEPLOY.md) 第 7 节。
