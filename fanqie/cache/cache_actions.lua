@@ -23,6 +23,7 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local Menu = require("ui/widget/menu")
 local Log = require("fanqie.logger")
 local CoverCache = require("fanqie.cover_cache")
+local Async = safe_require("fanqie.async")
 
 local M = {}
 
@@ -486,6 +487,18 @@ function M:clearAllCache()
         return
     end
 
+    -- 🔴 清缓存前必须先**停掉所有还会往这个目录写文件的异步链**，否则：
+    --    ① 封面预下载（`_preloadAllCovers` / 页级 `cache_covers_step`）每下完一张就
+    --       开一个新文件；`lfs.dir` 边删边被写入，遍历会提前结束
+    --       ⇒ 实测「缓存已清除 共删除 1 个文件」，而目录里还剩一整个书架的书；
+    --    ② 就算这一趟删干净了，后台链在几秒内又把封面全下回来，用户看到的还是「没清掉」。
+    --    两条链都挂在 `_cancelCoverLoading()` 的 generation 上，翻 generation 即可让
+    --    未完成的回调整段作废；再做一次按 tag 的硬取消，掐掉正在跑的子进程。
+    pcall(function() self:_cancelCoverLoading() end)
+    if Async and Async.cancel_tag then
+        pcall(Async.cancel_tag, "covers")
+    end
+
     local ProgressWidget = require("ui/widget/progresswidget")
     local progress = ProgressWidget:new{
         width = Screen and (Screen:getWidth() - 100) or nil,
@@ -518,6 +531,10 @@ function M:clearAllCache()
     count_files(dir)
 
     local removed_count = 0
+    -- 进度条刷新节流：`forceRePaint()` 每次都要重画整屏，而这里可能删几千个文件
+    -- （145 本书 × 每章 2 个文件 + 封面）。只在跨过 5% 台阶时刷一次，
+    -- 既不卡 UI，又能让用户看到进度在动。
+    local next_paint_at = 0.05
     local function remove_tree(path)
         for entry in lfs.dir(path) do
             if entry ~= "." and entry ~= ".." then
@@ -532,16 +549,35 @@ function M:clearAllCache()
                     end
                     removed_count = removed_count + 1
                     if total_files > 0 then
-                        progress:setProgress(removed_count / total_files)
+                        local ratio = removed_count / total_files
+                        if ratio >= next_paint_at then
+                            next_paint_at = ratio + 0.05
+                            -- 🔴 KOReader 的 ProgressWidget **没有** `setProgress`
+                            --    （方法清单只有 setPercentage / getPercentageFromPosition …）。
+                            --    此前写的 `progress:setProgress(x)` 每次都抛
+                            --    「attempt to call method 'setProgress' (a nil value)」，
+                            --    而唯一的调用点被 `pcall(remove_tree, dir)` 包着 ⇒ 错误被吞、
+                            --    循环**在删除第 1 个文件后**就中断 ⇒ 用户看到
+                            --    「缓存已清除 共删除 1 个文件」，磁盘上却一点没少。
+                            --    pcall 只该兜「目录读到一半消失」这类真异常，不能替必修的 bug 兜底。
+                            pcall(function() progress:setPercentage(math.floor(ratio * 100)) end)
+                            UIManager:forceRePaint()
+                        end
                     end
-                    UIManager:forceRePaint()
                 end
             end
         end
     end
 
-    pcall(remove_tree, dir)
+    -- 降级路径：真出了 IO 异常也要把「删了多少」如实报出来，而不是静默报成功。
+    local ok_tree, tree_err = pcall(remove_tree, dir)
     UIManager:close(progress_dialog)
+    if not ok_tree then
+        if Log then Log.warn("[缓存管理] 清除缓存中断: " .. tostring(tree_err)) end
+        self:showInfo(T(_("缓存已清除（中断）\n共删除 %1 个文件\n%2"),
+            tostring(removed_count), tostring(tree_err):sub(1, 120)))
+        return
+    end
     self:showInfo(string.format(_("缓存已清除\n共删除 %d 个文件"), removed_count))
 end
 

@@ -1312,16 +1312,76 @@ end
 -- 解析用纯 Lua 模式匹配（不引 JSON 库）：结构由服务端生成、字段固定，
 -- 且 %b[] / %b{} 是平衡匹配，能把 picInfos 数组和 lowPicInfos 干净切开。
 
+--- 漫画页明文 `web_uri` → 可直接下载的 CDN 地址。
+---
+--- 与 `FanQie.mobile_cover` 同一套口径（p6-novel.byteimg.com，无签名）：漫画正文里的
+--- `web_uri` 是裸路径（`novel-pic/<md5>`），必须补成 `…~tplv-shrink:0:0.image` 才回 200；
+--- 裸路径或带 tplv 的旧写法都直接 403（实测）。
+--- ⚠️ 这里**不要**复用封面那档 `~tplv-shrink:320:0.image`：封面 320 够用，
+---    漫画整页图缩到 320 宽就糊了。`shrink:0:0` = 不缩放（实测与原图同字节数）。
+local function comic_page_url(uri)
+    if type(uri) ~= "string" or uri == "" then return nil end
+    local path = uri:match("(novel%-pic/[^~%?#]+)")
+    if not path then
+        -- 已经是完整 URL：只接受番茄自家 CDN，外部地址原样保留
+        local host, host_path = uri:match("^https?://([^/]+)/([^?#]+)")
+        if not host then return nil end
+        if not host:lower():match("byteimg%.com$") then return uri end
+        path = host_path
+    end
+    path = path:gsub("^/", ""):gsub("~tplv[^/]*$", "")
+    if path == "" then return nil end
+    return FanQie.MOBILE_COVER_CDN .. "/" .. path .. "~tplv-shrink:0:0.image"
+end
+
 --- 从漫画 JSON 中抽出图片清单；不是漫画则返回 nil。
+---
+--- 支持**两种**服务端格式（实测同一本书会下发其中任一种，取决于章节）：
+---
+--- ① 旧格式（`picInfos`，扁平数组，整章共用一把 key）：
+---    {"itemId":…,"picInfos":[{"picUrl":"https://…","width":…,"height":…,"md5":…}],
+---     "encrypt":true,"encrypt_key":"…","lowPicInfos":[…]}
+---
+--- ② 新格式（`materials` + `skeleton`，**每页各自**带明文 uri 与加密 uri）：
+---    {"materials":{"img_0":{"data":{"web_uri":"novel-pic/…","md5":"…",
+---                                   "width":1063,"height":1000,
+---                                   "encrypt_web_uri":"tos-cn-i-…/…",
+---                                   "encrypt_algorithm":"aes-256-gcm"},"type":"img"},…},
+---     "skeleton":{"data":[{"element_name":"img_0",…},…],"type":"json"}}
+---    🔴 新格式**没有** encrypt_key，因为它是**按页**给 encrypt_web_uri（每页一个加密对象）。
+---    但明文 `web_uri` 仍可从 p6-novel.byteimg.com 直接取到（实测 200 / image/jpeg），
+---    所以这里优先用明文 web_uri，**不**走整章解密 —— 也就不用猜每页的 key。
+---    渲染顺序以 `skeleton.data` 为准（materials 是 map，遍历顺序不保证）。
+---
+--- ⚠️ 新格式的正文外面还包着 `<header></header><article><html><body>…</body></html></article>`
+---    且 JSON 里的引号被转义成 `&#34;`。两层都要先剥掉，否则既嗅探不到 `{` 开头，
+---    也匹配不到任何字段名。
 ---@param raw string 解密后的章节内容
 ---@return table|nil pics { {url=, width=, height=, md5=}, … }
 function Content.parse_comic_pics(raw)
     if type(raw) ~= "string" or #raw < 16 then return nil end
     local s = raw:match("^%s*(.-)%s*$") or ""
-    -- 快速否定：小说正文以 '<' 开头，且不含 picInfos（O(1)，不影响小说链路开销）
-    if s:sub(1, 1) ~= "{" or not s:find('"picInfos"', 1, true) then
+    -- 快速否定：小说正文以 '<' 开头（且不含 picInfos/materials）。O(1)，不影响小说链路开销
+    if not s:find('"picInfos"', 1, true) and not s:find("materials", 1, true) then
         return nil
     end
+    -- 新格式：剥掉 HTML 外壳 + 还原被转义的引号，再交给下面统一的解析
+    if s:sub(1, 1) == "<" and s:find("materials", 1, true) then
+        local body = s:match("<body>(.*)</body>") or s:match("<article>(.*)</article>") or s
+        body = body:gsub("&#34;", '"'):gsub("&quot;", '"')
+            :gsub("&#39;", "'"):gsub("&amp;", "&")
+        s = body:match("^%s*(.-)%s*$") or ""
+    end
+    if s:sub(1, 1) ~= "{" then return nil end
+
+    -- ② 新格式：materials（map）+ skeleton（顺序）
+    if s:find('"materials"', 1, true) then
+        local pics = Content._parse_materials_pics(s)
+        if pics and #pics > 0 then return pics, false, nil end
+        -- 落到下面继续试旧格式（理论上不会同时出现，防御性）
+    end
+
+    if not s:find('"picInfos"', 1, true) then return nil end
     -- 平衡括号取值：%b[] 不会把后面 lowPicInfos 的数组一起吞进来
     local arr = s:match('"picInfos"%s*:%s*(%b[])')
     if not arr then return nil end
@@ -1343,6 +1403,58 @@ function Content.parse_comic_pics(raw)
     local encrypt = s:match('"encrypt"%s*:%s*true') ~= nil
     local key_hex = s:match('"encrypt_key"%s*:%s*"([^"]*)"')
     return pics, encrypt, key_hex
+end
+
+--- 新格式（materials + skeleton）的图片清单。
+--- 明文的 `web_uri` → 无签名 CDN；顺序按 `skeleton.data` 的 element_name。
+---@param s string 已剥壳、引号已还原的 JSON
+---@return table|nil pics
+function Content._parse_materials_pics(s)
+    local dict = s:match('"materials"%s*:%s*(%b{})')
+    if not dict then return nil end
+
+    -- materials 是 map：先把 "img_N" → {url, width, height, md5} 收进来
+    local by_name = {}
+    for name, obj in dict:gmatch('"(img_%d+)"%s*:%s*(%b{})') do
+        local data = obj:match('"data"%s*:%s*(%b{})') or obj
+        local uri = data:match('"web_uri"%s*:%s*"([^"]+)"')
+        local url = comic_page_url(uri)
+        if url then
+            by_name[name] = {
+                url = url,
+                width = tonumber(data:match('"width"%s*:%s*(%d+)')) or 0,
+                height = tonumber(data:match('"height"%s*:%s*(%d+)')) or 0,
+                md5 = data:match('"md5"%s*:%s*"([^"]*)"'),
+            }
+        end
+    end
+    if next(by_name) == nil then return nil end
+
+    -- 顺序以 skeleton 为准（map 遍历无序，漫画页会乱序）
+    local pics = {}
+    local skeleton = s:match('"skeleton"%s*:%s*(%b{})')
+    if skeleton then
+        local list = skeleton:match('"data"%s*:%s*(%b[])')
+        for obj in (list or ""):gmatch("(%b{})") do
+            local name = obj:match('"element_name"%s*:%s*"(img_%d+)"')
+                or obj:match('"elementInfo"%s*:%s*"(img_%d+)"')
+            local p = name and by_name[name]
+            if p then
+                pics[#pics + 1] = p
+                by_name[name] = nil   -- 同一页只出一次
+            end
+        end
+    end
+    -- skeleton 缺失或被截断：按 img_N 的数字序补齐剩余（不丢页）
+    if #pics < (function() local n = 0 for _ in pairs(by_name) do n = n + 1 end return n end)() then
+        local rest = {}
+        for name, p in pairs(by_name) do
+            rest[#rest + 1] = { n = tonumber(name:match("img_(%d+)")) or 0, p = p }
+        end
+        table.sort(rest, function(a, b) return a.n < b.n end)
+        for _i, item in ipairs(rest) do pics[#pics + 1] = item.p end
+    end
+    return pics
 end
 
 --- 漫画图片清单 → XHTML 片段（每页一个 <img>）。

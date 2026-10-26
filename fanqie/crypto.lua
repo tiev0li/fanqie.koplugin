@@ -13,6 +13,13 @@
 -- 本文件是主插件侧的公共实现，不要合并两者。
 
 local ok_bit, bit = pcall(require, "bit")
+
+-- 下面两个分支都要给这 8 个位运算函数赋值，所以先声明成**局部变量**。
+-- ⚠️ 原先这里是隐式全局（`band = …` 没有 local），LuaJIT 走 `bit` 分支时一切正常，
+--    所以一直没暴露；但它会把 8 个名字写进全局表，并且一旦 `bit` 与数学实现都不可用，
+--    后续 `band(...)` 会在运行期报「attempt to call global 'band' (a nil value)」。
+local band, bor, bxor, bnot, lshift, rshift, rol, ror
+
 if not ok_bit then
     local function toUInt32(x)
         return (x % 4294967296)
