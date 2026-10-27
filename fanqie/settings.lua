@@ -72,6 +72,9 @@ local defaults = {
         interval_minutes = 60,
         notifications = false,
         auto_download = false,
+        -- 上次自动追更检查的时间戳（自动预下载用）：避免每次开书架都打一遍目录接口。
+        -- 「检查更新」按钮的手动检查不受这个节流约束。
+        last_auto_check_at = 0,
     },
     offline = {
         enabled = false,

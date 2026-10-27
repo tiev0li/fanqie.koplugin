@@ -71,6 +71,70 @@ function M.decorate(books, library)
     return books
 end
 
+--- 检查间隔是否已到（自动预下载的节流闸门）。
+function M.check_due(settings)
+    local updates = settings:get("updates", {})
+    if updates.enabled == false then return false end
+    local interval = tonumber(updates.interval_minutes) or 60
+    if interval <= 0 then return false end
+    local last = tonumber(updates.last_auto_check_at) or 0
+    return (os.time() - last) >= interval * 60
+end
+
+--- 通知能力探测：KOReader 版本带 Notification 才返回 true。
+function M.notifications_available()
+    local ok, Notification = pcall(require, "ui/widget/notification")
+    if not ok or type(Notification) ~= "table" then return false end
+    -- Notification 是类（模块表），notify 在类表上；用点访问避免把类当实例调用
+    return type(Notification.notify) == "function"
+end
+
+--- 应用内或系统通知（按用户设置与能力降级）。
+-- @return true=已发出（系统）/ false=仅应用内或未发
+function M.notify(plugin, text)
+    local updates = plugin.settings:get("updates", {})
+    if not M.notifications_available() then return false end
+    if updates.notifications ~= true then return false end
+    local ok, Notification = pcall(require, "ui/widget/notification")
+    if not ok then return false end
+    pcall(function() Notification:notify(text) end)
+    return true
+end
+
+--- Wi-Fi 下自动追更：书架打开时调用。只在「已联网 + 间隔已到 + 非离线模式」时
+--- 触发一次后台检查；检查发现新章且用户开了 auto_download 才自动下载。
+--- 🔴 绝不主动开 Wi-Fi（is_online 探测，不 isConnected-wifi 启用）。
+function M.auto_update(plugin, books)
+    if not (plugin.library and books and #books > 0) then return end
+    local settings = plugin.settings
+    if settings:is_offline_mode() then return end
+    if not M.check_due(settings) then return end
+    local ok_net, NetworkMgr = pcall(require, "ui/network/manager")
+    if not ok_net or not NetworkMgr then return end
+    local ok_online, online = pcall(function() return NetworkMgr:isOnline() end)
+    if not ok_online or not online then return end
+    -- 先记账再跑：检查期间书架又打开一次也不会重复触发
+    local updates = settings:get("updates", {})
+    updates.last_auto_check_at = os.time()
+    settings:set("updates", updates)
+    settings:flush()
+    M.refresh(plugin, books, function(ok, results)
+        if not ok then return end
+        local new_books, new_total = 0, 0
+        for _, state in pairs(results) do
+            if (state.new_count or 0) > 0 then
+                new_books = new_books + 1
+                new_total = new_total + state.new_count
+            end
+        end
+        if new_total <= 0 then return end
+        M.notify(plugin, string.format(_("追更：%d 本书更新了 %d 章"), new_books, new_total))
+        if settings:get("updates", {}).auto_download == true then
+            M.download_updates(plugin, books)
+        end
+    end)
+end
+
 --- 下载全部更新：逐书串行，复用 Download.execute 的节流/跳过/取消。
 function M.download_updates(plugin, books)
     local Download = require("fanqie.download")

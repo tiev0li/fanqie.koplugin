@@ -126,6 +126,12 @@ function M:showBookList(books, opts)
     local ShelfView = require("fanqie.shelf_view")
     self._shelf_books = books
 
+    -- Wi-Fi 自动追更：间隔已到才触发（update_center.auto_update 内部有节流闸门，
+    -- 不联网/离线模式/未到间隔都会静默跳过，绝不主动开 Wi-Fi）。
+    pcall(function()
+        require("fanqie.update_center").auto_update(self, books)
+    end)
+
     -- ① 书架已经在屏幕上（后台刷新回来 / 原地刷新）：**不要关掉重建**。
     --    关掉再建会：丢掉滚动位置、闪一次全屏、并且把菜单重新压到栈顶
     --    （用户如果在刷新的这一两秒里点了「开始阅读」，书架就会盖住阅读器）。

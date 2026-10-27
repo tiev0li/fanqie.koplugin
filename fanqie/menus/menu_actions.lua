@@ -470,6 +470,84 @@ function M:getSettingsMenuItems()
             end,
         },
         {
+            -- 自动追更：进入书架时按间隔静默检查新章；绝不主动开 Wi-Fi。
+            -- 检查由 update_center.auto_update 内部的节流闸门守着。
+            text = _("自动追更"),
+            help_text = _("进入书架时按间隔静默检查新章节；配合「自动下载更新」使用"),
+            sub_item_table_func = function()
+                local UpdateCenter = require("fanqie.update_center")
+                local items = {
+                    {
+                        text = _("进入书架自动检查"),
+                        checked_func = function()
+                            return self.settings:get("updates", {}).enabled ~= false
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            local updates = self.settings:get("updates", {})
+                            updates.enabled = not (updates.enabled ~= false)
+                            self.settings:set("updates", updates)
+                            self.settings:flush()
+                        end,
+                    },
+                    {
+                        text = _("检查到更新后自动下载"),
+                        checked_func = function()
+                            return self.settings:get("updates", {}).auto_download == true
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            local updates = self.settings:get("updates", {})
+                            updates.auto_download = not (updates.auto_download == true)
+                            self.settings:set("updates", updates)
+                            self.settings:flush()
+                            self:showInfo(updates.auto_download and _("已开启：检查到新章后自动下载") or _("已关闭自动下载"), 2)
+                        end,
+                    },
+                }
+                local interval = tonumber(self.settings:get("updates", {}).interval_minutes) or 60
+                local interval_items = {}
+                for _i, mins in ipairs({ 15, 30, 60, 1440 }) do
+                    interval_items[#interval_items + 1] = {
+                        text = mins == 1440 and _("每天") or string.format(_("每 %1 分钟"), tostring(mins)),
+                        checked_func = function() return interval == mins end,
+                        keep_menu_open = true,
+                        callback = function()
+                            local updates = self.settings:get("updates", {})
+                            updates.interval_minutes = mins
+                            self.settings:set("updates", updates)
+                            self.settings:flush()
+                        end,
+                    }
+                end
+                items[#items + 1] = {
+                    text = string.format(_("检查间隔（当前 %1 分钟）"), tostring(interval)),
+                    keep_menu_open = true,
+                    sub_item_table = interval_items,
+                }
+                -- 系统通知：KOReader 版本支持才可选
+                local supported = UpdateCenter.notifications_available()
+                items[#items + 1] = {
+                    text = _("系统通知"),
+                    help_text = supported
+                        and _("有新章节时发系统通知")
+                        or _("当前 KOReader 版本不支持系统通知，仅应用内提醒"),
+                    checked_func = function()
+                        return self.settings:get("updates", {}).notifications == true
+                    end,
+                    select_enabled_func = function() return supported end,
+                    keep_menu_open = true,
+                    callback = function()
+                        local updates = self.settings:get("updates", {})
+                        updates.notifications = not (updates.notifications == true)
+                        self.settings:set("updates", updates)
+                        self.settings:flush()
+                    end,
+                }
+                return items
+            end,
+        },
+        {
             text = _("扫码登录"),
             keep_menu_open = false,
             callback = function()

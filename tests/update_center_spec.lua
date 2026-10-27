@@ -78,6 +78,43 @@ package.preload["fanqie.download"] = function() return { execute = function() en
 lib:mark_seen("20")
 UpdateCenter.download_updates(plugin, books)
 check(#infos == 1 and infos[1]:find("没有需要下载的更新", 1, true) ~= nil, "no updates shows info")
+-- check_due：节流闸门（last_auto_check_at 与 os.time() 同口径）
+local updates_state = { enabled = true, interval_minutes = 60, last_auto_check_at = 0 }
+local settings2 = { get = function(_, key) return key == "updates" and updates_state or {} end,
+    set = function(_, key, v) updates_state = v end, flush = function() end,
+    is_offline_mode = function() return false end }
+check(UpdateCenter.check_due(settings2) == true, "never checked: due")
+updates_state.last_auto_check_at = os.time() - 30
+check(UpdateCenter.check_due(settings2) == false, "checked 30s ago: not due")
+updates_state.enabled = false
+check(UpdateCenter.check_due(settings2) == false, "disabled: not due")
+updates_state.enabled = true
+updates_state.interval_minutes = 0
+check(UpdateCenter.check_due(settings2) == false, "zero interval: not due")
+-- auto_update：离线模式 / 未到间隔 / 断网时静默跳过（不打任何请求）
+local requested = 0
+package.preload["fanqie.content"] = function()
+    return { fetch_catalog = function() requested = requested + 1; return nil end,
+        load_catalog_cache = function() return nil end }
+end
+package.preload["ui/network/manager"] = function()
+    return { isOnline = function() return false end }
+end
+local plugin2 = { library = lib, settings = settings2, client = {} }
+updates_state.interval_minutes = 60
+updates_state.last_auto_check_at = 0
+UpdateCenter.auto_update(plugin2, { { book_id = "10" } })
+check(requested == 0, "offline network: auto update silently skipped")
+settings2.is_offline_mode = function() return true end
+package.preload["ui/network/manager"] = function()
+    return { isOnline = function() return true end }
+end
+UpdateCenter.auto_update(plugin2, { { book_id = "10" } })
+check(requested == 0, "offline mode: auto update silently skipped")
+-- 通知：未开系统通知时不发（返回 false）
+check(UpdateCenter.notify(plugin2, "x") == false, "notifications off: not sent")
+-- 系统通知能力探测：测试环境没有 KOReader Notification ⇒ false
+check(UpdateCenter.notifications_available() == false, "no Notification module: unavailable")
 os.execute(("rm -rf %q"):format(dir))
 if failures > 0 then os.exit(1) end
 print("Update center: OK")
