@@ -217,6 +217,9 @@ function FanQiePlugin:onReaderReady()
     -- ⚠️ 只在这里清：ReaderReady 是两条打开路径（插件 showReaderUI / 用户从
     --    文件管理器直接开章节）的唯一共同终点，showReaderUI 返回时新实例还没建出来。
     _state.switching_document = false
+    if self:isCurrentDocFanqie() then
+        pcall(function() require("fanqie.reading_session").restore(self) end)
+    end
     local ok, err = pcall(function() self:_muteEndDocumentAction() end)
     if not ok and Log and Log.error then
         Log.error("mute end_document_action failed:", tostring(err))
@@ -287,6 +290,9 @@ function FanQiePlugin:init()
     self.settings = Settings:new()
     Log.init(self.settings)
     self.client = Client:new(self.settings)
+    local Library = require("fanqie.library")
+    self.library = Library:new(self.settings)
+    self.library:migrate(_state.getPendingProgress())
     self.patches_ok = Patches.verifyPatched()
     -- 尽早安装补丁（含 ReaderLink 段评链接拦截），确保已打开的书也能立即生效
     if not self.patches_ok then

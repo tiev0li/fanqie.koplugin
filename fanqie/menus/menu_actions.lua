@@ -43,6 +43,12 @@ function M:getMainMenuItems()
             end),
         },
         {
+            text = _("最近阅读"),
+            callback = self:safeCallback(_("最近阅读"), function()
+                require("fanqie.library_view").show_history(self)
+            end),
+        },
+        {
             text = _("书城"),
             callback = self:safeCallback(_("书城"), function()
                 self:showStore()

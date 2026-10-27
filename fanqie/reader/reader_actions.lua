@@ -352,6 +352,8 @@ function M:onPageUpdate(pageno)
     if not total_pages or total_pages <= 0 then return end
 
     _state.last_page_number = pageno
+    local Session = require("fanqie.reading_session")
+    Session.record(self)
 
     -- 阅读中定期上传（幂等）：只在用户真的在翻页时确认定时器活着。
     -- 关文档 / 切章会把它停掉，下一次翻页再重新挂上。
@@ -785,6 +787,7 @@ function M:onCloseDocument()
     --    末页翻章时 progress≈1.0，等于把新章标记成「已读完」——
     --    这就是「上传进度有时候不对」的来源。
     local doc_item_id = self:_currentDocChapterItemId()
+    require("fanqie.reading_session").record(self, true)
     -- 🔴 必须在这里（清状态之前、任何分支之前）取快照：
     --    「点开始阅读 → 子进程下载章节 → showReaderUI」这段窗口里也会走到
     --    CloseDocument，此时阅读器还没建立。只有进入本钩子时文档**确实已打开**，

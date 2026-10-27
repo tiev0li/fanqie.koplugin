@@ -62,6 +62,20 @@ function M:_openBookWithCache(book, cached_chapters)
         end
     end
     if Log then Log.info("openBookWithCache: start_index=" .. start_index) end
+    if self._pending_position_conflict
+            and tostring(self._pending_position_conflict.local_position.book_id) == tostring(book.book_id) then
+        local conflict = self._pending_position_conflict
+        self._pending_position_conflict = nil
+        local ConfirmBox = require("ui/widget/confirmbox")
+        UIManager:show(ConfirmBox:new{
+            text = string.format(_("本地在第 %s 章，云端在第 %s 章。使用哪一个？"),
+                conflict.local_position.chapter_index, conflict.cloud_position.chapter_index),
+            ok_text = _("继续本地"), cancel_text = _("使用云端"),
+            ok_callback = function() self:openChapter(book, cached_chapters, conflict.local_position.chapter_index) end,
+            cancel_callback = function() self:openChapter(book, cached_chapters, conflict.cloud_position.chapter_index) end,
+        })
+        return
+    end
     self:openChapter(book, cached_chapters, start_index)
 end
 
@@ -172,12 +186,23 @@ function M:_refreshCatalogInBackground(book, old_count)
                         end
                         -- skip_cloud=true：别把已有标记算进「本机进度」跟自己比
                         local local_idx = _state.localLatestChapterIndex(book_id, #chapters, true)
-                        if cloud_idx and (not local_idx or cloud_idx > local_idx) then
-                            _state.markCloudAhead(book_id, cloud_idx)
-                            if Log then Log.info("catalog bg: cloud ahead at chapter ", cloud_idx) end
+                        local record = self.library and self.library:get(book_id)
+                        local local_position = record and record.position
+                        if not local_position and local_idx then
+                            local_position = { book_id = book_id, chapter_index = local_idx,
+                                item_id = chapters[local_idx] and chapters[local_idx].itemId }
+                        end
+                        local cloud_position = require("fanqie.reading_session").cloud_position(
+                            book_id, target_item_id, chapters, item, item.read_timestamp)
+                        local conflict = require("fanqie.reading_session").conflict(local_position, cloud_position)
+                        if conflict and self.settings:get("sync", {}).ask_on_conflict ~= false
+                                and not self._pending_position_conflict then
+                            self._pending_position_conflict = conflict
                             if self:isCurrentDocFanqie() then
-                                self:showInfo(T(_("检测到云端进度在第 %1 章，下次进入本书时会跳过去"), cloud_idx))
+                                self:showInfo(_("发现不同的云端阅读位置，下次进入本书时可以选择"))
                             end
+                        elseif cloud_idx and (not local_idx or cloud_idx > local_idx) then
+                            _state.markCloudAhead(book_id, cloud_idx)
                         end
                     end
                     break
@@ -191,6 +216,42 @@ function M:_refreshCatalogInBackground(book, old_count)
             self:showInfo(T(_("目录已更新：新增 %1 章"), reported))
         end
     end, { poll_interval = 0.3, timeout = 30, tag = "catalog_bg" })
+end
+
+function M:_chooseReadingPosition(book, chapters, start_index, progress, open)
+    local Session = require("fanqie.reading_session")
+    local cloud
+    if progress and progress.data then
+        for _, item in ipairs(progress.data) do
+            if tostring(item.book_id or item.bookId) == tostring(book.book_id) then
+                cloud = Session.cloud_position(book.book_id, item.item_id or item.itemId,
+                    chapters, item, item.read_timestamp)
+                break
+            end
+        end
+    end
+    local record = self.library and self.library:get(book.book_id)
+    local conflict = Session.conflict(record and record.position, cloud)
+    if not conflict or self.settings:get("sync", {}).ask_on_conflict == false then
+        open(start_index)
+        return
+    end
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local T = require("ffi/util").template
+    local function label(p)
+        local title = chapters[p.chapter_index] and chapters[p.chapter_index].title or p.item_id
+        return T(_("第 %1 章 %2（%3%%）"), p.chapter_index, title or "",
+            math.floor((p.chapter_progress or 0) * 100))
+    end
+    UIManager:show(ConfirmBox:new{
+        text = _("本地和云端阅读位置不同，要继续哪一个？") .. "\n\n"
+            .. _("本地：") .. label(conflict.local_position) .. "\n"
+            .. _("云端：") .. label(conflict.cloud_position),
+        ok_text = _("继续本地"), cancel_text = _("使用云端"),
+        ok_callback = function() open(conflict.local_position.chapter_index) end,
+        cancel_callback = function() open(conflict.cloud_position.chapter_index) end,
+        other_buttons = {{ { text = _("取消"), callback = function() end } }},
+    })
 end
 
 function M:openBook(book)
@@ -326,7 +387,9 @@ function M:openBook(book)
             start_index = 1
         end
 
-        self:openChapter(book, chapters, start_index)
+        self:_chooseReadingPosition(book, chapters, start_index, result.progress, function(idx)
+            self:openChapter(book, chapters, idx)
+        end)
     end, { poll_interval = 0.3, timeout = 60 })
 end
 
