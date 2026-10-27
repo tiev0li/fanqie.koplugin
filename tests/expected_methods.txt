@@ -114,3 +114,9 @@ showBusy
 closeBusy
 showInfo
 showError
+showChapterSearch
+showChapterSearchResults
+showPerBookCacheMenu
+showBookCacheActions
+_chooseReadingPosition
+getBackupMenuItems

@@ -18,7 +18,12 @@ function M.check_book(plugin, book)
     local b = { book_id = book_id }
     local ok, chapters = pcall(Content.fetch_catalog, plugin.client, b)
     if not ok or type(chapters) ~= "table" or #chapters == 0 then
-        if Log and Log.warn then Log.warn("update_center: catalog empty/failed for", tostring(book_id)) end
+        -- 诊断：区分「抛错」与「空目录」，记录真实错误（截断防刷屏）
+        local why = not ok and ("err: " .. tostring(chapters):sub(1, 120))
+            or ("empty: got " .. type(chapters) .. " len " .. tostring(type(chapters) == "table" and #chapters or -1))
+        if Log and Log.warn then
+            Log.warn("update_center: catalog failed for " .. tostring(book_id) .. " - " .. why)
+        end
         return nil
     end
     plugin.library:catalog_observation(book_id, chapters, book.status)

@@ -702,6 +702,7 @@ local ACTION_MODULES = {
         "getSourceDetailMenuItems",
         "showSourceRateLimitDialog",
         "getLogMenuItems",
+        "getBackupMenuItems",
         "getPreDownloadMenuItems",
         "setPreDownloadCount",
         "showDownloadDirPicker",
@@ -745,6 +746,8 @@ local ACTION_MODULES = {
     }},
     { module = "fanqie.chapters.chapter_actions", methods = {
         "showChapterListing",
+        "showChapterSearch",
+        "showChapterSearchResults",
         "showJumpToChapter",
         "get_chapters",
         "_downloadHeartbeatPath",
@@ -782,6 +785,8 @@ local ACTION_MODULES = {
     }},
     { module = "fanqie.cache.cache_actions", methods = {
         "getCacheMenuItems",
+        "showPerBookCacheMenu",
+        "showBookCacheActions",
         "showDownloadManager",
         "getCacheSizeMB",
         "clearAllCache",
@@ -789,6 +794,7 @@ local ACTION_MODULES = {
     { module = "fanqie.opening.open_book_actions", methods = {
         "_openBookWithCache",
         "_refreshCatalogInBackground",
+        "_chooseReadingPosition",
         "openBook",
     }},
 }

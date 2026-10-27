@@ -831,6 +831,13 @@ function Client:fetch_chapter_directory(book_id)
                 end
                 return { code = 0, data = { chapterList = list } }
             end
+            -- 诊断：回退也失败时记录原因（官方/内置两条链都挂时才能定位是哪条）
+            local ok_l, logger_mod = pcall(require, "fanqie.logger")
+            if ok_l and logger_mod and logger_mod.warn then
+                logger_mod.warn("directory fallback failed for " .. tostring(book_id)
+                    .. ": " .. (ok2 and ("empty " .. tostring(chapters and #chapters or -1))
+                        or tostring(chapters):sub(1, 120)))
+            end
         end
     end
 
