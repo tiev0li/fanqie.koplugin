@@ -506,6 +506,12 @@ function M:getSettingsMenuItems()
             end,
         },
         {
+            text = _("备份与恢复"),
+            sub_item_table_func = function()
+                return self:getBackupMenuItems()
+            end,
+        },
+        {
             text = _("调试日志"),
             sub_item_table_func = function()
                 return self:getLogMenuItems()
@@ -523,6 +529,77 @@ function M:setStartupPage(page)
         pcall(function() Startup.syncKoreaderStartWith(self.settings) end)
     end
     self:showInfo(_("初始页面已更新，重启 KOReader 后生效"))
+end
+
+-- 备份与恢复：导出到用户选择的位置 / 从备份恢复（先校验后替换，可回滚）。
+-- 备份不含 Cookie、设备身份、密钥或日志（白名单字段，见 fanqie/backup.lua）。
+function M:getBackupMenuItems()
+    local Backup = require("fanqie.backup")
+    local self_ref = self
+    return {
+        {
+            text = _("导出备份"),
+            keep_menu_open = true,
+            callback = function()
+                PathChooser:new{
+                    title = _("选择备份保存位置"),
+                    select_directory = true,
+                    select_file = false,
+                    on_confirm = function(path)
+                        local target = path .. "/fanqie-backup-"
+                            .. os.date("%Y%m%d-%H%M%S") .. ".json"
+                        local ok, result = Backup.export(self_ref, target)
+                        if ok then
+                            self_ref:showInfo(T(_("备份已保存：%1"), result), 4)
+                        else
+                            self_ref:showInfo(T(_("备份失败：%1"), tostring(result)))
+                        end
+                    end,
+                }:show()
+            end,
+        },
+        {
+            text = _("从备份恢复"),
+            keep_menu_open = true,
+            callback = function()
+                PathChooser:new{
+                    title = _("选择备份文件"),
+                    select_file = true,
+                    file_filter = function(filename)
+                        return filename:match("%.json$")
+                    end,
+                    on_confirm = function(path)
+                        -- 预检通过才弹确认；失败只提示原因，零修改
+                        local payload, err = Backup.preview(path)
+                        if not payload then
+                            self_ref:showInfo(T(_("备份不可用：%1"), tostring(err)))
+                            return
+                        end
+                        local created = payload.created_at
+                            and os.date("%Y-%m-%d %H:%M", payload.created_at) or _("未知时间")
+                        UIManager:show(ConfirmBox:new{
+                            text = T(_("将用 %1 创建的备份覆盖当前设置与阅读记录。\n当前数据会另存为 .bak 回滚点。"), created)
+                                .. "\n\n"
+                                .. T(_("包含 %1 项设置、%2 本书的位置记录。"),
+                                    tostring(H.table_size(payload.settings or {})),
+                                    tostring(payload.library and payload.library.books
+                                        and H.table_size(payload.library.books) or 0)),
+                            ok_text = _("恢复"),
+                            cancel_text = _("取消"),
+                            ok_callback = function()
+                                local ok, result = Backup.restore(self_ref, path)
+                                if ok then
+                                    self_ref:showInfo(T(_("已恢复。重启 KOReader 后全部生效。\n回滚点：%1"), tostring(result)), 5)
+                                else
+                                    self_ref:showInfo(T(_("恢复失败：%1"), tostring(result)))
+                                end
+                            end,
+                        })
+                    end,
+                }:show()
+            end,
+        },
+    }
 end
 
 -- ===========================================================================
