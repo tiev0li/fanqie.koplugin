@@ -13,17 +13,7 @@ package.preload["libs/libkoreader-lfs"] = function()
 end
 package.preload.util = function() return { makePath = function() end } end
 package.preload.datastorage = function() return { getFullDataDir = function() return dir end } end
-package.preload.json = function()
-    local function serialize(v)
-        if type(v) == "number" or type(v) == "boolean" then return tostring(v) end
-        if type(v) == "string" then return string.format("%q", v) end
-        if v == nil then return "null" end
-        local a = {}
-        for k, x in pairs(v) do a[#a + 1] = "[" .. serialize(k) .. "]=" .. serialize(x) end
-        return "{" .. table.concat(a, ",") .. "}"
-    end
-    return { encode = serialize, decode = function(s) return assert(loadstring("return " .. s))() end }
-end
+package.preload.json = function() return dofile(root .. "/tests/json_stub.lua") end
 package.preload.gettext = function() return function(t) return t end end
 package.preload["ffi/util"] = function() return { template = function(f, ...) return f end } end
 package.preload["fanqie.logger"] = function() return {} end
@@ -67,7 +57,7 @@ local payload = Backup.preview(target)
 check(payload ~= nil, "preview validates exported file")
 check(payload.library and payload.library.books["10"] ~= nil, "library position travels")
 -- 破坏校验和（stable_encode 的键格式是 ["chapter_index"]=3）
-local tampered = raw:gsub('%["chapter_index"%]=3', '%["chapter_index"%]=99')
+local tampered = raw:gsub('"chapter_index":3', '"chapter_index":99')
 check(tampered ~= raw, "gsub pattern matches stable format")
 local f = io.open(dir .. "/bad.json", "wb"); f:write(tampered); f:close()
 check(Backup.preview(dir .. "/bad.json") == nil, "tampered payload rejected")

@@ -13,20 +13,7 @@ end
 package.preload.util = function() return { makePath = function() end } end
 package.preload.datastorage = function() return { getFullDataDir = function() return dir end } end
 
-package.preload.json = function()
-    local function serialize(v)
-        if type(v) == "number" or type(v) == "boolean" then return tostring(v) end
-        if type(v) == "string" then return string.format("%q", v) end
-        local a = {}
-        for k, x in pairs(v) do
-            a[#a + 1] = "[" .. serialize(k) .. "]=" .. serialize(x)
-        end
-        return "{" .. table.concat(a, ",") .. "}"
-    end
-    return { encode = serialize, decode = function(s)
-        local f = assert(loadstring("return " .. s)); return f()
-    end }
-end
+package.preload.json = function() return dofile(root .. "/tests/json_stub.lua") end
 local H = require("fanqie.helper")
 H.make_dir = function() return true end
 local Library = require("fanqie.library")

@@ -619,11 +619,15 @@ function M:getBackupMenuItems()
             text = _("导出备份"),
             keep_menu_open = true,
             callback = function()
-                PathChooser:new{
+                -- 🔴 参数名必须是 KOReader 的 `onConfirm`（驼峰）。写 `on_confirm` 不会报错，
+                --    但回调永远不触发 —— 选了目录什么也不会发生（真机回归踩中）。
+                -- 目录选择用 select_file=false + show_files=false（见 downloadmgr.lua 用法）。
+                local chooser = PathChooser:new{
                     title = _("选择备份保存位置"),
-                    select_directory = true,
                     select_file = false,
-                    on_confirm = function(path)
+                    select_directory = true,
+                    show_files = false,
+                    onConfirm = function(path)
                         local target = path .. "/fanqie-backup-"
                             .. os.date("%Y%m%d-%H%M%S") .. ".json"
                         local ok, result = Backup.export(self_ref, target)
@@ -633,20 +637,23 @@ function M:getBackupMenuItems()
                             self_ref:showInfo(T(_("备份失败：%1"), tostring(result)))
                         end
                     end,
-                }:show()
+                }
+                UIManager:show(chooser)
             end,
         },
         {
             text = _("从备份恢复"),
             keep_menu_open = true,
             callback = function()
-                PathChooser:new{
+                local chooser = PathChooser:new{
                     title = _("选择备份文件"),
                     select_file = true,
+                    select_directory = false,
+                    show_files = true,
                     file_filter = function(filename)
-                        return filename:match("%.json$")
+                        return filename:match("%.json$") ~= nil
                     end,
-                    on_confirm = function(path)
+                    onConfirm = function(path)
                         -- 预检通过才弹确认；失败只提示原因，零修改
                         local payload, err = Backup.preview(path)
                         if not payload then
@@ -674,7 +681,8 @@ function M:getBackupMenuItems()
                             end,
                         })
                     end,
-                }:show()
+                }
+                UIManager:show(chooser)
             end,
         },
     }

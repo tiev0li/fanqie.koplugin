@@ -326,6 +326,23 @@ function ShelfMenu:onLeftButtonTap()
                     ShelfView.show_update_center(self)
                 end,
             }},
+            {{
+                text = _("备份与恢复"),
+                callback = function()
+                    drop_action_dialog()
+                    local plugin = (self._shelf_opts or {}).plugin
+                    if not plugin then return end
+                    -- 用 Menu 承载两项（导出/恢复），避免再嵌一层 ButtonDialog
+                    local items = plugin:getBackupMenuItems() or {}
+                    local menu = Menu:new{
+                        title = _("备份与恢复"),
+                        item_table = items,
+                        is_borderless = true,
+                        is_popout = false,
+                    }
+                    UIManager:show(menu)
+                end,
+            }},
             {{ text = _("关闭"), callback = drop_action_dialog }},
         },
     }

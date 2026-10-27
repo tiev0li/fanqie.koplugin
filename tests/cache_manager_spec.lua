@@ -35,13 +35,10 @@ package.preload["libs/libkoreader-lfs"] = function()
 end
 package.preload.util = function() return { makePath = function() end } end
 package.preload.datastorage = function() return { getFullDataDir = function() return "/data" end } end
-package.preload.json = function() return { encode = function() return "{}" end, decode = function() return {} end } end
+package.preload["ffi/util"] = function() return { template = function(f) return f end } end
 package.preload.gettext = function() return function(t) return t end end
-package.preload["ffi/util"] = function() return { template = function(f, ...) return f end } end
-local State = { is_downloading = false, current_document_path = nil }
-package.preload["fanqie.runtime"] = function() return { state = State } end
+package.preload.json = function() return dofile(root .. "/tests/json_stub.lua") end
 package.preload["fanqie.logger"] = function() return {} end
--- Content 用真实模块但指向内存 FS
 package.preload["fanqie.content"] = function()
     return {
         book_cache_dir = function(_, book_id) return "/cache/" .. book_id end,
@@ -58,6 +55,11 @@ H.file_exists = function(p) return FS[p] ~= nil and FS[p].mode == "file" end
 H.delete_dir = function(p) FS[p] = nil; return true end
 H.join_path = function(a, b) return a .. "/" .. b end
 
+-- 当前章保护：正在读 chapter_a.html
+local State = { is_downloading = false, current_document_path = "/cache/111/chapter_a.html" }
+package.preload["fanqie.runtime"] = function() return { state = State, } end
+-- book_id_from_path 需要
+State.book_id_from_path = function(p) return p:match("/cache/([^/]+)/") end
 local CacheManager = require("fanqie.cache_manager")
 local failures = 0
 local function check(v, m) if not v then failures = failures + 1; io.stderr:write("FAIL: ", m, "\n") end end
@@ -79,11 +81,6 @@ check(b111 and b111.chapters == 2, "chapter count correct")
 check(b111 and b111.bytes == 3550, "bytes include html+images+index")
 check(b111 and b111.images == 1, "non-html non-lua counted as image")
 
--- 当前章保护：正在读 chapter_a.html
-State.current_document_path = "/cache/111/chapter_a.html"
-package.preload["fanqie.runtime"] = function() return { state = State, } end
--- book_id_from_path 需要
-State.book_id_from_path = function(p) return p:match("/cache/([^/]+)/") end
 local plugin = { settings = settings, library = nil }
 local ok, files = CacheManager.clear_book(plugin, "111", "all")
 check(ok, "clear all succeeds")

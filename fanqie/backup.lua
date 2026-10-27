@@ -60,11 +60,12 @@ function M.export(plugin, target_path, opts)
         library = plugin.library.data,
     }
     if opts.include_cache then payload.include_cache = true end
-    -- 序列化键排序：KOReader 的 json/rapidjson 与这里的测试桩都按 pairs 输出，
-    -- 同一 payload 两次编码顺序不同 ⇒ 摘要没法对。构建时强制按固定字段序编码。
+    -- 🔴 备份必须是**标准 JSON**（不是 Lua 表字面量）：设备上的 H.json_decode 是
+    --    rapidjson，只认 JSON；写成 Lua 字面量会让校验恒失败。也**绝不能**用
+    --    loadstring 解析用户备份文件（那是任意代码执行）。
     local encoded = M.stable_encode(payload)
     if not encoded then return false, _("无法序列化备份") end
-    local final = '{["checksum"]="' .. checksum(encoded) .. '",' .. encoded:sub(2)
+    local final = '{"checksum":"' .. checksum(encoded) .. '",' .. encoded:sub(2)
 
     local dir = target_path:match("^(.*)/[^/]+$")
     if dir and not H.dir_exists(dir) and not H.make_dir(dir) then
@@ -84,15 +85,37 @@ function M.export(plugin, target_path, opts)
     return true, target_path, #final
 end
 
---- 键排序的稳定序列化：同一数据永远产生同一字节串（摘要的前提）。
--- 只支持备份 payload 这类「字符串键 / 表嵌套 / 标量值」的数据形状。
+--- 稳定序列化：输出**标准 JSON**，键按字典序（同一数据永远产生同一字节串）。
+-- 支持字符串键对象与连续整数下标数组。
+-- 🔴 必须是 JSON 而非 Lua 字面量：设备解码器是 rapidjson；且绝不能用
+--    loadstring 解析用户提供的备份文件（任意代码执行）。
 local function stable_encode(value)
     if value == nil then return "null" end
     local t = type(value)
-    if t == "number" then return string.format("%.14g", value) end
+    if t == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then return nil end
+        return string.format("%.14g", value)
+    end
     if t == "boolean" then return tostring(value) end
     if t == "string" then return string.format("%q", value) end
     if t ~= "table" then return nil end
+
+    -- 连续整数下标 = 数组
+    local n, is_array = 0, true
+    for k in pairs(value) do
+        if type(k) ~= "number" or k < 1 or k % 1 ~= 0 then is_array = false; break end
+        if k > n then n = k end
+    end
+    if is_array then
+        local parts = {}
+        for i = 1, n do
+            local v_enc = stable_encode(value[i])
+            if not v_enc then return nil end
+            parts[i] = v_enc
+        end
+        return "[" .. table.concat(parts, ",") .. "]"
+    end
+
     local keys = {}
     for k in pairs(value) do
         if type(k) ~= "string" then return nil end
@@ -103,7 +126,7 @@ local function stable_encode(value)
     for _, k in ipairs(keys) do
         local v_enc = stable_encode(value[k])
         if not v_enc then return nil end
-        parts[#parts + 1] = "[" .. string.format("%q", k) .. "]=" .. v_enc
+        parts[#parts + 1] = string.format("%q", k) .. ":" .. v_enc
     end
     return "{" .. table.concat(parts, ",") .. "}"
 end
