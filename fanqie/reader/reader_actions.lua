@@ -354,6 +354,15 @@ function M:onPageUpdate(pageno)
     _state.last_page_number = pageno
     local Session = require("fanqie.reading_session")
     Session.record(self)
+    -- 每页耗时采样（预计剩余时间用）：只记真实翻页间隔，前台无翻页不计时
+    local now = now_seconds()
+    if self._last_page_ts and now > self._last_page_ts then
+        self._page_durations = self._page_durations or {}
+        local d = self._page_durations
+        d[#d + 1] = now - self._last_page_ts
+        if #d > 50 then table.remove(d, 1) end
+    end
+    self._last_page_ts = now
 
     -- 阅读中定期上传（幂等）：只在用户真的在翻页时确认定时器活着。
     -- 关文档 / 切章会把它停掉，下一次翻页再重新挂上。

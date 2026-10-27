@@ -508,6 +508,12 @@ function FanQiePlugin:addToMainMenu(menu_items)
                     end),
                 },
                 {
+                    text = _("阅读统计"),
+                    callback = self:safeCallback(_("阅读统计"), function()
+                        require("fanqie.library_view").show_reading_stats(self)
+                    end),
+                },
+                {
                     text = _("目录"),
                     callback = self:safeCallback(_("目录"), function()
                         -- onShowFanQieToc 需要 current_book + 章节表（都在内存里）；
