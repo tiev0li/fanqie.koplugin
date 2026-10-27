@@ -65,6 +65,22 @@ local defaults = {
     advanced = {
         developer_logs = false,
     },
+    -- 本地资料库是阅读位置/追更/缓存的事实源；凭证仍只由原设置模块持有。
+    library_schema = 1,
+    updates = {
+        enabled = true,
+        interval_minutes = 60,
+        notifications = false,
+        auto_download = false,
+    },
+    offline = {
+        enabled = false,
+        auto_clean = false,
+        keep_read_chapters = 0,
+        max_size_mb = 0,
+    },
+    history = { limit = 50 },
+    backup = { include_cache = false },
     shelf = {
         -- 书架排序键 / 方向（参考 koobone 的 settings:shelf.sort_order + sort_asc）
         --   last_read  按最后阅读（服务端 read_timestamp，默认倒序＝最近读的在最前）
