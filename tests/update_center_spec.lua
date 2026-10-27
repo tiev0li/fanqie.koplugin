@@ -1,0 +1,83 @@
+-- 追更中心：基线、尾部新增、空响应保留快照、未读计数、下载队列。
+local root = (arg and arg[1]) or "."
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
+local dir = os.tmpname(); os.remove(dir)
+assert(os.execute(("mkdir -p %q"):format(dir)) == 0)
+package.preload["libs/libkoreader-lfs"] = function()
+    return { attributes = function(path, key)
+        local f = io.open(path, "rb")
+        if f then f:close(); return key == "size" and 1 or "file" end
+        return nil
+    end }
+end
+package.preload.util = function() return { makePath = function() end } end
+package.preload.datastorage = function() return { getFullDataDir = function() return dir end } end
+package.preload.json = function()
+    local function serialize(v)
+        if type(v) == "number" or type(v) == "boolean" then return tostring(v) end
+        if type(v) == "string" then return string.format("%q", v) end
+        local a = {}
+        for k, x in pairs(v) do a[#a + 1] = "[" .. serialize(k) .. "]=" .. serialize(x) end
+        return "{" .. table.concat(a, ",") .. "}"
+    end
+    return { encode = serialize, decode = function(s) return assert(loadstring("return " .. s))() end }
+end
+package.preload["fanqie.content"] = function() return { fetch_catalog = function() return nil end,
+    load_catalog_cache = function() return nil end } end
+package.preload["fanqie.async"] = function() return { run = function() end } end
+package.preload["fanqie.logger"] = function() return {} end
+package.preload["fanqie.runtime"] = function() return { state = {} } end
+package.preload["ui/uimanager"] = function() return { scheduleIn = function() end } end
+package.preload["gettext"] = function() return function(t) return t end end
+
+local H = require("fanqie.helper"); H.make_dir = function() return true end
+local Library = require("fanqie.library")
+local UpdateCenter = require("fanqie.update_center")
+local failures = 0
+local function check(v, m) if not v then failures = failures + 1; io.stderr:write("FAIL: ", m, "\n") end end
+
+local lib = Library:new({ data_dir = dir }, { now = function() return 100 end })
+local chapters5 = { { itemId = "1" }, { itemId = "2" }, { itemId = "3" }, { itemId = "4" }, { itemId = "5" } }
+lib:record_position({ book_id = "10", item_id = "3", chapter_index = 3 })
+lib:catalog_observation("10", chapters5)
+local state = lib:update_state("10")
+check(state.unread_count == 2, "unread = total - read")
+check(state.new_count == 0, "first observation is baseline, not all-new")
+lib:mark_seen("10")
+local chapters6 = { { itemId = "1" }, { itemId = "2" }, { itemId = "3" }, { itemId = "4" }, { itemId = "5" }, { itemId = "6" } }
+lib:catalog_observation("10", chapters6)
+state = lib:update_state("10")
+check(state.new_count == 1, "tail append detected as one new chapter")
+check(state.total_chapters == 6, "total chapters updated")
+-- 空响应：catalog_observation 拒绝空表，旧快照保留
+check(lib:catalog_observation("10", {}) == false, "empty catalog rejected")
+check(lib:update_state("10").total_chapters == 6, "old snapshot survives empty response")
+-- 目录前缀变化但 seen 仍在新目录里：按「seen 之后的章数」计（可能低估，安全方向）
+lib:mark_seen("10")
+local reordered = { { itemId = "X" }, { itemId = "1" }, { itemId = "2" }, { itemId = "3" }, { itemId = "4" }, { itemId = "5" }, { itemId = "6" } }
+lib:catalog_observation("10", reordered)
+check(lib:update_state("10").new_count == 0, "seen still present: count chapters after it")
+-- seen 在新目录里找不到（章节全换）：保守地全部算新
+lib:record_position({ book_id = "20", item_id = "a", chapter_index = 1 })
+lib:catalog_observation("20", { { itemId = "a" }, { itemId = "b" } })
+lib:mark_seen("20")
+lib:catalog_observation("20", { { itemId = "p" }, { itemId = "q" }, { itemId = "r" } })
+check(lib:update_state("20").new_count == 3, "seen missing: all chapters counted new")
+-- decorate 只加字段
+local books = { { book_id = "20", title = "书" } }
+UpdateCenter.decorate(books, lib)
+check(books[1].update_new == 3 and books[1].title == "书", "decorate adds fields without clobbering")
+-- check_book：fetch_catalog 失败返回 nil，不清快照
+local plugin = { client = {}, library = lib, settings = { get = function() return {} end } }
+check(UpdateCenter.check_book(plugin, { book_id = "10" }) == nil, "failed fetch returns nil")
+check(lib:update_state("10") ~= nil, "snapshot still present after failed fetch")
+-- download_updates：无更新时提示
+local infos = {}
+plugin.showInfo = function(_, t) infos[#infos + 1] = t end
+package.preload["fanqie.download"] = function() return { execute = function() end } end
+lib:mark_seen("20")
+UpdateCenter.download_updates(plugin, books)
+check(#infos == 1 and infos[1]:find("没有需要下载的更新", 1, true) ~= nil, "no updates shows info")
+os.execute(("rm -rf %q"):format(dir))
+if failures > 0 then os.exit(1) end
+print("Update center: OK")

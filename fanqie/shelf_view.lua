@@ -104,7 +104,13 @@ local function book_chapter_text(book)
     if read < 0 then read = 0 end
     if read > total then read = total end
     if read <= 0 then return T(_("未读 %1 章"), tostring(total)) end
-    return T(_("%1/%2 章"), tostring(read), tostring(total))
+    local base = T(_("%1/%2 章"), tostring(read), tostring(total))
+    -- 追更中心写入的新章计数（update_center.decorate）：有更新就挂在进度后
+    local new_count = tonumber(book.update_new) or 0
+    if new_count > 0 then
+        base = base .. T(_(" · 新增 %1 章"), tostring(new_count))
+    end
+    return base
 end
 
 -- ---------------------------------------------------------------------------
@@ -311,6 +317,13 @@ function ShelfMenu:onLeftButtonTap()
                 callback = function()
                     drop_action_dialog()
                     ShelfView.show_search_dialog(self)
+                end,
+            }},
+            {{
+                text = _("追更中心"),
+                callback = function()
+                    drop_action_dialog()
+                    ShelfView.show_update_center(self)
                 end,
             }},
             {{ text = _("关闭"), callback = drop_action_dialog }},
@@ -656,7 +669,12 @@ local function build_items(books, opts)
     local matcher = make_matcher(opts.filter_text)
     local filtered = {}
     for _, book in ipairs(books or {}) do
-        if not matcher or matcher(book) then filtered[#filtered + 1] = book end
+        if not matcher or matcher(book) then
+            -- 「只看有更新」：追更中心写入 update_new>0 的书才保留
+            if not opts.updates_only or (tonumber(book.update_new) or 0) > 0 then
+                filtered[#filtered + 1] = book
+            end
+        end
     end
     local key, asc = resolve_sort(opts)
     local sorted = sort_books(filtered, key, asc)
@@ -708,6 +726,9 @@ function ShelfView.refresh(menu, books, opts)
     opts = opts or menu._shelf_opts or {}
     if books then opts.books = books end
     local list = opts.books or menu._shelf_books or {}
+    if opts.plugin and opts.plugin.library then
+        require("fanqie.update_center").decorate(list, opts.plugin.library)
+    end
     decorate_opts(opts)
     local items = build_items(list, opts)
     if #items == 0 and (opts.filter_text and opts.filter_text ~= "") then
@@ -864,6 +885,10 @@ function ShelfView.show(opts)
     decorate_opts(opts)
     local mode = ShelfView.resolve_view(opts)
     opts.view_mode = mode
+    -- 追更快照徽标：资料库里有观察记录的书挂上「新增 N 章」
+    if opts.plugin and opts.plugin.library then
+        require("fanqie.update_center").decorate(opts.books or {}, opts.plugin.library)
+    end
     local items = build_items(opts.books or {}, opts)
     local page_callback
     if opts.on_page_changed then
@@ -899,6 +924,78 @@ function ShelfView.show(opts)
     menu._on_refresh = opts.on_refresh
     UIManager:show(menu)
     return menu
+end
+
+-- 追更中心对话框：检查更新 / 只看有更新 / 下载全部更新 / 全部标记已读。
+-- 检查走 update_center.refresh（子进程串行），结果写回资料库后原地重刷书架。
+function ShelfView.show_update_center(menu)
+    local opts = (menu and menu._shelf_opts) or {}
+    local plugin = opts.plugin
+    if not plugin or not plugin.library then return end
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local UpdateCenter = require("fanqie.update_center")
+    local dialog
+
+    local function refresh_list()
+        local books = menu._shelf_books or {}
+        UpdateCenter.decorate(books, plugin.library)
+        ShelfView.refresh(menu, books, opts)
+    end
+
+    dialog = ButtonDialog:new{
+        title = _("追更中心"),
+        title_align = "center",
+        buttons = {
+            {{
+                text = _("检查更新"),
+                callback = function()
+                    UIManager:close(dialog)
+                    local books = menu._shelf_books or {}
+                    plugin:showBusy(_("正在检查更新..."))
+                    UpdateCenter.refresh(plugin, books, function(ok, results)
+                        plugin:closeBusy()
+                        if not ok then
+                            plugin:showInfo(_("检查更新失败或已关闭"))
+                            return
+                        end
+                        local new_total = 0
+                        for _, state in pairs(results) do
+                            new_total = new_total + (state.new_count or 0)
+                        end
+                        refresh_list()
+                        plugin:showInfo(T(_("检查完成：%1 本书共 %2 章新更新"),
+                            tostring(H.table_size(results)), tostring(new_total)), 3)
+                    end)
+                end,
+            }},
+            {{
+                text = opts.updates_only and _("显示全部") or _("只看有更新"),
+                callback = function()
+                    UIManager:close(dialog)
+                    opts.updates_only = not opts.updates_only
+                    refresh_list()
+                end,
+            }},
+            {{
+                text = _("下载全部更新"),
+                callback = function()
+                    UIManager:close(dialog)
+                    UpdateCenter.download_updates(plugin, menu._shelf_books or {})
+                end,
+            }},
+            {{
+                text = _("全部标记已读"),
+                callback = function()
+                    UIManager:close(dialog)
+                    for _, book in ipairs(menu._shelf_books or {}) do
+                        plugin.library:mark_seen(book.book_id or book.bookId)
+                    end
+                    refresh_list()
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
 end
 
 -- 动态更新书架菜单内容（不关闭重开，避免闪烁）

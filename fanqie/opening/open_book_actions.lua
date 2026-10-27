@@ -115,6 +115,10 @@ function M:_refreshCatalogInBackground(book, old_count)
         -- 新目录落缓存（不回填 current_chapters，避免阅读中索引错位）
         Content.save_catalog_cache(settings, book_id, chapters)
         _state.setDirectoryCache(book_id, chapters)
+        -- 追更中心：开书后台刷新拿到的目录也记一次观察（首轮建基线）
+        if self.library then
+            pcall(self.library.catalog_observation, self.library, book_id, chapters, book.status)
+        end
 
         -- 🔴 v2.16.21：新章节必须**并进 `current_chapters`**，否则阅读中
         --    「到末页自动下一章」用的还是开书那一刻的旧目录 —— 旧目录末章之后
@@ -336,6 +340,9 @@ function M:openBook(book)
         if result.chapters and #result.chapters > 0 then
             Content.save_catalog_cache(settings, book_id, result.chapters)
             _state.setDirectoryCache(book_id, result.chapters)
+            if self.library then
+                pcall(self.library.catalog_observation, self.library, book_id, result.chapters, book.status)
+            end
         end
 
         UIManager:scheduleIn(0.1, function()
