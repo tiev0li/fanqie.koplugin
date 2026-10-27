@@ -138,6 +138,20 @@ function M:showChapterListing(book, opts)
                 title_align = "center",
                 buttons = {
                     {{
+                        text = _("搜索章节"),
+                        callback = function()
+                            UIManager:close(action_dialog)
+                            plugin:showChapterSearch(book, chapters)
+                        end,
+                    }},
+                    {{
+                        text = _("跳转章节号"),
+                        callback = function()
+                            UIManager:close(action_dialog)
+                            plugin:showJumpToChapter(book, chapters)
+                        end,
+                    }},
+                    {{
                         text = _("刷新目录"),
                         callback = function()
                             UIManager:close(action_dialog)
@@ -250,6 +264,77 @@ function M:showChapterListing(book, opts)
     end, { poll_interval = 0.3, timeout = 60 })
 end
 
+-- 目录搜索：按章节标题做字面、大小写不敏感匹配；结果项回指原章节对象，
+-- 跳转仍走 openChapter，缓存/当前章标记与原目录一致。
+function M:showChapterSearch(book, chapters)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("搜索章节"),
+        input = "",
+        input_hint = _("输入章节标题关键字"),
+        buttons = {
+            {
+                {
+                    text = _("取消"),
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("搜索"),
+                    is_enter_default = true,
+                    callback = function()
+                        local needle = H.trim(dialog:getInputText() or "")
+                        if needle == "" then
+                            UIManager:show(InfoMessage:new{ text = _("请输入关键字"), timeout = 2 })
+                            return
+                        end
+                        UIManager:close(dialog)
+                        self:showChapterSearchResults(book, chapters, needle)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function M:showChapterSearchResults(book, chapters, needle)
+    local lower = string.lower(needle)
+    local items = {}
+    for i, chapter in ipairs(chapters) do
+        local title = chapter.title or ""
+        if title ~= "" and string.find(string.lower(title), lower, 1, true) then
+            items[#items + 1] = {
+                text = string.format("%d. %s", i, title),
+                callback = function()
+                    if _state.active_menu then
+                        UIManager:close(_state.active_menu)
+                        _state.active_menu = nil
+                    end
+                    self:openChapter(book, chapters, i)
+                end,
+            }
+        end
+    end
+    if #items == 0 then
+        UIManager:show(InfoMessage:new{
+            text = T(_("没有匹配「%1」的章节"), needle), timeout = 2,
+        })
+        return
+    end
+    local menu = Menu:new{
+        title = T(_("搜索结果：%1（%2 条）"), needle, #items),
+        item_table = items,
+        items_per_page = 12,
+        is_borderless = true,
+        is_popout = false,
+    }
+    _state.active_menu = menu
+    UIManager:show(menu)
+end
+
 function M:showJumpToChapter(book, chapters)
     local InputDialog = require("ui/widget/inputdialog")
     local total = #chapters
@@ -335,6 +420,8 @@ function M:navigateToChapter(book, chapters, chapter_index, opts)
 
     _state.current_book = book
     _state.current_chapters = chapters
+    -- 跳转前记录一层返回位置（单层栈，连续跳转以最新一次为准）
+    pcall(function() require("fanqie.reading_session").remember_return(self) end)
 
     -- 从全局状态获取段评开关，传递 review=true 给内容获取
     -- skip_cache_index=true：子进程不写共享索引，由父进程统一持久化

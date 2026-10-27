@@ -520,6 +520,18 @@ function FanQiePlugin:addToMainMenu(menu_items)
                     end),
                 },
                 {
+                    text = _("返回刚才位置"),
+                    callback = self:safeCallback(_("返回刚才位置"), function()
+                        if not (_state.current_book and _state.current_chapters) then
+                            self:showInfo(_("无书籍信息"))
+                            return
+                        end
+                        if not require("fanqie.reading_session").return_back(self) then
+                            self:showInfo(_("没有可返回的位置"))
+                        end
+                    end),
+                },
+                {
                     text = _("下载"),
                     callback = self:safeCallback(_("下载"), function()
                         local book = _state.current_book
