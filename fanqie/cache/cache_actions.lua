@@ -233,6 +233,13 @@ function M:getCacheMenuItems()
         end,
     })
     table.insert(items, {
+        text = _("按书管理缓存"),
+        keep_menu_open = true,
+        callback = function()
+            self:showPerBookCacheMenu()
+        end,
+    })
+    table.insert(items, {
         text = _("清除全部缓存"),
         keep_menu_open = true,
         callback = function()
@@ -252,6 +259,71 @@ function M:getCacheMenuItems()
         end,
     })
     return items
+end
+
+-- 按书缓存管理：逐书列出占用，长按/点按进入清理选项。
+-- 清理走 cache_manager（保护当前章与活动下载，删后同步索引）。
+function M:showPerBookCacheMenu()
+    local CacheManager = require("fanqie.cache_manager")
+    local CoverCacheMod = require("fanqie.cover_cache")
+    local list = CacheManager.inventory(self.settings)
+    if #list == 0 then
+        self:showInfo(_("没有书籍缓存"))
+        return
+    end
+    -- 按占用降序
+    table.sort(list, function(a, b) return a.bytes > b.bytes end)
+    local items = {}
+    for _, entry in ipairs(list) do
+        local record = self.library and self.library:get(entry.book_id)
+        local title = record and record.title or entry.book_id
+        items[#items + 1] = {
+            text = string.format("%s · %d 章 · %s", title, entry.chapters,
+                CoverCacheMod and CoverCacheMod.human_bytes(entry.bytes) or tostring(entry.bytes)),
+            callback = function()
+                self:showBookCacheActions(entry.book_id, title)
+            end,
+        }
+    end
+    local menu = Menu:new{
+        title = T(_("按书缓存（%1 本）"), #list),
+        item_table = items,
+        items_per_page = 12,
+        is_borderless = true,
+        is_popout = false,
+    }
+    UIManager:show(menu)
+end
+
+function M:showBookCacheActions(book_id, title)
+    local CacheManager = require("fanqie.cache_manager")
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local self_ref = self
+    local function do_clear(mode, label)
+        UIManager:show(ConfirmBox:new{
+            text = T(_("确定%1《%2》的缓存？\n正在阅读的章节不会被删除。"), label, title),
+            ok_text = _("确定"), cancel_text = _("取消"),
+            ok_callback = function()
+                local ok, files, bytes, err = CacheManager.clear_book(self_ref, book_id, mode)
+                if not ok then
+                    self_ref:showInfo(err or _("清理失败"))
+                    return
+                end
+                local CoverCacheMod = require("fanqie.cover_cache")
+                self_ref:showInfo(T(_("已删除 %1 个文件（%2）"), tostring(files),
+                    CoverCacheMod and CoverCacheMod.human_bytes(bytes) or tostring(bytes)))
+            end,
+        })
+    end
+    UIManager:show(ButtonDialog:new{
+        title = title,
+        title_align = "center",
+        buttons = {
+            {{ text = _("清除图片"), callback = function() do_clear("images", _("清除图片")) end }},
+            {{ text = _("清除已读完章节"), callback = function() do_clear("read", _("清除已读完章节")) end }},
+            {{ text = _("清除整本"), callback = function() do_clear("all", _("清除整本")) end }},
+        },
+    })
 end
 
 -- ===========================================================================

@@ -453,6 +453,23 @@ function M:getSettingsMenuItems()
             end,
         },
         {
+            -- 离线模式：只抑制插件自己的后台网络（书架自动刷新 / 后台目录刷新），
+            -- 不改 KOReader 全局网络设置；已缓存内容照常可读。
+            text = _("离线模式"),
+            help_text = _("关闭插件后台联网（书架自动刷新等），已缓存内容仍可阅读"),
+            checked_func = function()
+                return self.settings:is_offline_mode()
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local offline = self.settings:get("offline", {}) or {}
+                offline.enabled = not (offline.enabled == true)
+                self.settings:set("offline", offline)
+                self.settings:flush()
+                self:showInfo(offline.enabled and _("离线模式已开启") or _("离线模式已关闭"), 2)
+            end,
+        },
+        {
             text = _("扫码登录"),
             keep_menu_open = false,
             callback = function()

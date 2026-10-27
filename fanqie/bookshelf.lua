@@ -302,7 +302,8 @@ function Bookshelf:showBookshelf(opts)
             --    此时书架已经在屏幕上，showBookList 会走原地更新（幂等、不重建）。
             --    但如果调用方是「数据已经在手、只想要后台刷新」，也允许跳过首绘。
             if not opts.skip_show then self:showBookList(cached_shelf) end
-            -- 后台异步刷新
+            -- 后台异步刷新（离线模式：只画缓存，不打网络）
+            if self.settings:is_offline_mode() then return end
             if self:checkNetwork() and not State.shelf_auto_refreshing then
                 -- silent：不弹 loading，数据回来只原地更新（见 showBookList）。
                 if not silent then shelf_busy(self, _("正在刷新书架...")) end

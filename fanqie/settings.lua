@@ -250,6 +250,13 @@ function Settings:get_download_dir()
     return self.cache_dir
 end
 
+--- 离线模式：只抑制插件自身的后台网络任务（书架自动刷新 / 后台目录刷新 /
+--- 封面预下载），不影响用户主动发起的请求，也不改 KOReader 全局网络设置。
+function Settings:is_offline_mode()
+    local offline = self:get("offline", {})
+    return offline.enabled == true
+end
+
 function Settings:set_download_dir(path)
     if type(path) ~= "string" or path == "" then
         self:set("download_dir", "")
