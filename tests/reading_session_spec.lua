@@ -48,5 +48,14 @@ check(State.updated == 8, "return restores page")
 check(Session.return_back(plugin) == false, "return stack is single use")
 State.return_position = { book_id = "other", item_id = "100", page = 1 }
 check(Session.return_back(plugin) == false, "does not return across books")
+
+-- cloud_position：形参曾遮蔽同名函数（真机 "attempt to call local 'item_id'"）
+local chapters = { { itemId = "100" }, { itemId = "200" } }
+local cp = Session.cloud_position("10", "200", chapters, { page = 3, total_pages = 10 }, 123)
+check(cp ~= nil, "cloud_position resolves item")
+check(cp.chapter_index == 2 and cp.item_id == "200", "cloud item index resolved")
+check(cp.page == 3, "cloud page mapped")
+check(Session.cloud_position("10", "999", chapters, {}, nil) == nil, "unknown cloud item -> nil")
+check(Session.cloud_position("10", nil, chapters, {}, nil) == nil, "nil item -> nil")
 if failures > 0 then os.exit(1) end
 print("Reading session: OK")

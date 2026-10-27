@@ -51,16 +51,20 @@ function M.restore(plugin)
     end)
 end
 
-function M.cloud_position(book_id, item_id, chapters, progress, timestamp)
-    if not item_id then return nil end
+--- 云端候选位置。
+-- 🔴 形参不能叫 item_id：会遮蔽模块级 item_id(chapter) 函数（真机回归踩中，
+--    报 "attempt to call local 'item_id' (a string value)"）。
+function M.cloud_position(book_id, target_item_id, chapters, progress, timestamp)
+    if not target_item_id then return nil end
     local idx
+    local want = tostring(target_item_id)
     for i, chapter in ipairs(chapters or {}) do
-        if item_id(chapter) == tostring(item_id) then idx = i; break end
+        if item_id(chapter) == want then idx = i; break end
     end
     if not idx then return nil end
     local total = tonumber(progress and progress.total_pages)
     return {
-        book_id = book_id, item_id = tostring(item_id), chapter_index = idx,
+        book_id = book_id, item_id = want, chapter_index = idx,
         page = tonumber(progress and (progress.page or progress.page_index)),
         total_pages = total,
         chapter_progress = tonumber(progress and (progress.read_progress or progress.progress)),
