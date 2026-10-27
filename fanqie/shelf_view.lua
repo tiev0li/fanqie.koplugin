@@ -343,7 +343,25 @@ function ShelfMenu:onLeftButtonTap()
                     UIManager:show(menu)
                 end,
             }},
-            {{ text = _("关闭"), callback = drop_action_dialog }},
+            {{
+                text = _("缓存管理"),
+                callback = function()
+                    drop_action_dialog()
+                    local plugin = (self._shelf_opts or {}).plugin
+                    if not plugin or not plugin.getCacheMenuItems then return end
+                    -- 与主菜单同一入口：读文件系统的统计已在该方法内部做 pcall 兜底
+                    local menu = Menu:new{
+                        title = _("缓存管理"),
+                        item_table = plugin:getCacheMenuItems(),
+                        is_borderless = true,
+                        is_popout = false,
+                    }
+                    UIManager:show(menu)
+                end,
+            }, {
+                text = _("关闭"),
+                callback = drop_action_dialog,
+            }},
         },
     }
     self._action_dialog = dialog
