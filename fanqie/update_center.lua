@@ -109,6 +109,32 @@ end
 --- Wi-Fi 下自动追更：书架打开时调用。只在「已联网 + 间隔已到 + 非离线模式」时
 --- 触发一次后台检查；检查发现新章且用户开了 auto_download 才自动下载。
 --- 🔴 绝不主动开 Wi-Fi（is_online 探测，不 isConnected-wifi 启用）。
+--- 自动检查的候选书：按「最近阅读」优先，最多 auto_limit 本。
+--- 🔴 为什么不全库检查：真机实测书架 358 本，逐本 fork 子进程 + 请求耗时约 6 分钟，
+---    期间点书架/开书都会被拖住。自动检查只覆盖用户真正在读的书，全量留给
+---    用户主动点「检查更新」。
+function M.auto_candidates(plugin, books)
+    local limit = tonumber(plugin.settings:get("updates", {}).auto_limit) or 20
+    if limit <= 0 or limit >= #books then return books end
+    local scored = {}
+    for i, book in ipairs(books) do
+        local record = plugin.library and plugin.library:get(book.book_id or book.bookId)
+        local pos = record and record.position
+        scored[#scored + 1] = {
+            book = book,
+            ts = (pos and tonumber(pos.updated_at)) or tonumber(book.read_timestamp) or 0,
+            i = i,
+        }
+    end
+    table.sort(scored, function(a, b)
+        if a.ts ~= b.ts then return a.ts > b.ts end
+        return a.i < b.i
+    end)
+    local out = {}
+    for i = 1, math.min(limit, #scored) do out[i] = scored[i].book end
+    return out
+end
+
 function M.auto_update(plugin, books)
     if not (plugin.library and books and #books > 0) then return end
     local settings = plugin.settings
@@ -123,7 +149,8 @@ function M.auto_update(plugin, books)
     updates.last_auto_check_at = os.time()
     settings:set("updates", updates)
     settings:flush()
-    M.refresh(plugin, books, function(ok, results)
+    local candidates = M.auto_candidates(plugin, books)
+    M.refresh(plugin, candidates, function(ok, results)
         if not ok then return end
         local new_books, new_total = 0, 0
         for _, state in pairs(results) do
@@ -135,7 +162,7 @@ function M.auto_update(plugin, books)
         if new_total <= 0 then return end
         M.notify(plugin, string.format(_("追更：%d 本书更新了 %d 章"), new_books, new_total))
         if settings:get("updates", {}).auto_download == true then
-            M.download_updates(plugin, books)
+            M.download_updates(plugin, candidates)
         end
     end)
 end

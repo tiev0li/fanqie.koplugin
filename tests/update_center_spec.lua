@@ -111,6 +111,23 @@ package.preload["ui/network/manager"] = function()
 end
 UpdateCenter.auto_update(plugin2, { { book_id = "10" } })
 check(requested == 0, "offline mode: auto update silently skipped")
+-- auto_candidates：按最近阅读优先，限制 auto_limit
+local many = {}
+for i = 1, 50 do many[i] = { book_id = tostring(100 + i), read_timestamp = i } end
+local lib3 = { get = function(_, id) return { position = { updated_at = tonumber(id) - 100 } } end }
+local plugin3 = { library = lib3, settings = { get = function(_, key)
+    return key == "updates" and { auto_limit = 5 } or {} end } }
+local cand = UpdateCenter.auto_candidates(plugin3, many)
+check(#cand == 5, "auto candidates limited to auto_limit")
+check(cand[1].book_id == "150", "most recently read first")
+check(cand[5].book_id == "146", "ordered by recency")
+local plugin4 = { library = lib3, settings = { get = function(_, key)
+    return key == "updates" and { auto_limit = 0 } or {} end } }
+check(#UpdateCenter.auto_candidates(plugin4, many) == 50, "auto_limit 0 means all books")
+local plugin5 = { library = lib3, settings = { get = function(_, key)
+    return key == "updates" and { auto_limit = 999 } or {} end } }
+check(#UpdateCenter.auto_candidates(plugin5, many) == 50, "limit beyond shelf means all")
+
 -- 通知：未开系统通知时不发（返回 false）
 check(UpdateCenter.notify(plugin2, "x") == false, "notifications off: not sent")
 -- 系统通知能力探测：测试环境没有 KOReader Notification ⇒ false

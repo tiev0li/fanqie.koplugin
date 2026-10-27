@@ -72,6 +72,9 @@ local defaults = {
         interval_minutes = 60,
         notifications = false,
         auto_download = false,
+        -- 自动检查覆盖的书数（按最近阅读优先）；0 = 全库。真机 358 本全量检查约 6 分钟，
+        -- 会拖住书架操作，所以自动检查默认只覆盖最近读的 20 本；全量走手动「检查更新」。
+        auto_limit = 20,
         -- 上次自动追更检查的时间戳（自动预下载用）：避免每次开书架都打一遍目录接口。
         -- 「检查更新」按钮的手动检查不受这个节流约束。
         last_auto_check_at = 0,
