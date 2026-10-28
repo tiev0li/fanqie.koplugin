@@ -58,9 +58,9 @@ check(lib:update_state("20").new_count == 3, "seen missing: all chapters counted
 local books = { { book_id = "20", title = "书" } }
 UpdateCenter.decorate(books, lib)
 check(books[1].update_new == 3 and books[1].title == "书", "decorate adds fields without clobbering")
--- check_book：fetch_catalog 失败返回 nil，不清快照
+-- fetch_catalog_for_check：目录拉取失败返回 nil，不清快照
 local plugin = { client = {}, library = lib, settings = { get = function() return {} end } }
-check(UpdateCenter.check_book(plugin, { book_id = "10" }) == nil, "failed fetch returns nil")
+check(UpdateCenter.fetch_catalog_for_check(plugin, { book_id = "10" }) == nil, "failed fetch returns nil")
 check(lib:update_state("10") ~= nil, "snapshot still present after failed fetch")
 -- download_updates：无更新时提示
 local infos = {}
@@ -102,6 +102,28 @@ package.preload["ui/network/manager"] = function()
 end
 UpdateCenter.auto_update(plugin2, { { book_id = "10" } })
 check(requested == 0, "offline mode: auto update silently skipped")
+-- 子进程写入不回传：fetch_catalog_for_check 绝不能写资料库，
+-- 写库必须发生在父进程侧（apply_catalog）。历史缺陷：两者混在一起导致
+-- 20 本全检查成功、资料库却只剩 1 本。
+local writes = 0
+local fake_lib = {
+    catalog_observation = function() writes = writes + 1 end,
+    update_state = function() return { new_count = 0 } end,
+    get = function() return nil end,
+}
+-- 模块已被 require 缓存，直接替换函数（改 preload 不会生效）
+local ContentMod = require("fanqie.content")
+local real_fetch = ContentMod.fetch_catalog
+ContentMod.fetch_catalog = function() return { { itemId = "1" }, { itemId = "2" } } end
+local p_fetch = { library = fake_lib, client = {} }
+local fetched = UpdateCenter.fetch_catalog_for_check(p_fetch, { book_id = "9" })
+check(type(fetched) == "table" and #fetched.ids == 2, "fetch returns ids")
+check(writes == 0, "fetch must not write library (subprocess side)")
+UpdateCenter.apply_catalog(p_fetch, fetched)
+check(writes == 1, "apply_catalog writes library once (parent side)")
+check(UpdateCenter.fetch_catalog_for_check(p_fetch, { book_id = nil }) == nil, "missing book_id -> nil")
+ContentMod.fetch_catalog = real_fetch
+
 -- auto_candidates：按最近阅读优先，限制 auto_limit
 local many = {}
 for i = 1, 50 do many[i] = { book_id = tostring(100 + i), read_timestamp = i } end

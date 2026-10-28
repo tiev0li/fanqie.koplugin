@@ -11,14 +11,18 @@ local _state = Runtime.state
 local M = {}
 
 --- 检查一本书的目录变化（同步，子进程内调用）。
--- @return table|nil 更新状态（library.update_state 口径）
-function M.check_book(plugin, book)
+--- 在**子进程**里只做网络请求，不碰资料库。
+-- 🔴 关键：Async.run 是 fork 子进程 —— 子进程里对 `library.data` 的任何修改
+--    都不会回到父进程。早期实现直接在子进程里 catalog_observation，
+--    结果 20 本全部检查成功、资料库却只剩 1 本（父进程旧数据把所有写入覆盖了）。
+--    所以这里只返回目录，写库一律在 on_done（父进程）里做。
+-- @return table|nil { book_id, ids, total, status } 或 nil
+function M.fetch_catalog_for_check(plugin, book)
     local book_id = book.book_id or book.bookId
     if not book_id then return nil end
     local b = { book_id = book_id }
     local ok, chapters = pcall(Content.fetch_catalog, plugin.client, b)
     if not ok or type(chapters) ~= "table" or #chapters == 0 then
-        -- 诊断：区分「抛错」与「空目录」，记录真实错误（截断防刷屏）
         local why = not ok and ("err: " .. tostring(chapters):sub(1, 120))
             or ("empty: got " .. type(chapters) .. " len " .. tostring(type(chapters) == "table" and #chapters or -1))
         if Log and Log.warn then
@@ -26,8 +30,23 @@ function M.check_book(plugin, book)
         end
         return nil
     end
-    plugin.library:catalog_observation(book_id, chapters, book.status)
-    return plugin.library:update_state(book_id, #chapters)
+    -- 只带可序列化的最小数据过子进程边界（章节对象里可能有函数/临时字段）
+    local ids = {}
+    for i, chapter in ipairs(chapters) do
+        ids[i] = tostring(chapter.itemId or chapter.item_id or "")
+    end
+    return { book_id = tostring(book_id), ids = ids, total = #ids, status = book.status }
+end
+
+--- 父进程侧：把子进程取回的目录写进资料库并算出更新状态。
+function M.apply_catalog(plugin, fetched)
+    if type(fetched) ~= "table" or type(fetched.ids) ~= "table" or #fetched.ids == 0 then
+        return nil
+    end
+    local chapters = {}
+    for i, id in ipairs(fetched.ids) do chapters[i] = { itemId = id } end
+    plugin.library:catalog_observation(fetched.book_id, chapters, fetched.status)
+    return plugin.library:update_state(fetched.book_id, #chapters)
 end
 
 --- 串行检查整个书架。UI 线程只轮询，不阻塞。
@@ -52,10 +71,13 @@ function M.refresh(plugin, books, on_done)
         end
         local book = books[i]
         Async.run(function()
-            return M.check_book(plugin, book)
+            -- 子进程：只取目录，绝不写资料库
+            return M.fetch_catalog_for_check(plugin, book)
         end, function(ok, result)
+            -- 父进程：写库 + 记结果（子进程的写入传不回来，见 fetch_catalog_for_check 注释）
             if ok and type(result) == "table" then
-                results[tostring(book.book_id or book.bookId)] = result
+                local state = M.apply_catalog(plugin, result)
+                if state then results[tostring(result.book_id)] = state end
             end
             UIManager:scheduleIn(0, function() process_next(i + 1) end)
         end, { poll_interval = 0.3, timeout = 60, tag = "update_center" })
